@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 import sys
 
 
 class Error(Exception):
     pass
+
+
+class Repository(object):
+    def __init__(self, path=''):
+        self._apt_path = path
+        self._makeapt_path = os.path.join(self._apt_path, '.makeapt')
+
+    def init(self):
+        '''Initializes APT repository.'''
+        os.makedirs(self._makeapt_path)
 
 
 class CommandLineDriver(object):
@@ -14,16 +25,16 @@ class CommandLineDriver(object):
             'init': self.init,
         }
 
-    def init(self, args):
+    def init(self, repo, args):
         parser = argparse.ArgumentParser(
             description='Initialize APT repository.')
         args = parser.parse_args(args)
-        print('OK')
+        repo.init()
 
     def execute_command_line(self, args):
         parser = argparse.ArgumentParser(
             description='Debian APT repositories generator')
-        parser.add_argument('command', help='Command to run.')
+        parser.add_argument('command', help='The command to run.')
 
         command = sys.argv[1:2]
         command_args = sys.argv[2:]
@@ -32,12 +43,17 @@ class CommandLineDriver(object):
         if args.command not in self.COMMANDS:
             raise Error('Unknown command %r.' % args.command)
 
-        self.COMMANDS[args.command](command_args)
+        repo = Repository()
+        self.COMMANDS[args.command](repo, command_args)
 
     def run(self):
         self.execute_command_line(sys.argv[1:])
 
 
-if __name__ == '__main__':
+def main():
     driver = CommandLineDriver()
     driver.run()
+
+
+if __name__ == '__main__':
+    main()
