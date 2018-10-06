@@ -21,7 +21,8 @@ class Repository(object):
         self._BUFF_SIZE = 4096
 
     def _make_dir(self, path):
-        os.makedirs(path)
+        if not os.path.exists(path):
+            os.makedirs(path)
 
     def _make_file_dir(self, path):
         self._make_dir(os.path.dirname(path))
@@ -38,9 +39,10 @@ class Repository(object):
                 msg.update(chunk)
         return msg.hexdigest()
 
-    def _copy_file(self, src, dest):
+    def _copy_file(self, src, dest, overwrite=True):
         self._make_file_dir(dest)
-        shutil.copyfile(src, dest)
+        if overwrite or not os.path.exists(dest):
+            shutil.copyfile(src, dest)
 
     def _add_package(self, path):
         # Copy the package to the pool.
@@ -48,7 +50,7 @@ class Repository(object):
 
         path_in_pool = os.path.join(self._pool_path, hash[:2], hash[2:],
                                     os.path.basename(path))
-        self._copy_file(path, path_in_pool)
+        self._copy_file(path, path_in_pool, overwrite=False)
 
     def add(self, paths):
         '''Adds packages to repository.'''
