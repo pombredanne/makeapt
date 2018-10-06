@@ -6,6 +6,6 @@ Debian APT repositories generator
 ## Usage
 
 * ```shell
-makeapt init
-```
+  makeapt init
+  ```
 Creates new empty APT repository.
