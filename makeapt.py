@@ -144,19 +144,19 @@ class Repository(object):
             filenames[hash] = filename
         return filenames
 
-    def _add_package_to_index(self, dist, comp, hash, filename):
-        hash_entry = self._index.setdefault(hash, dict())
-        file_entry = hash_entry.setdefault(filename, set())
-        file_entry.add('%s:%s' % (dist, comp))
+    def _add_package_to_index(self, group, hash, filename):
+        filenames = self._index.setdefault(hash, dict())
+        groups = filenames.setdefault(filename, set())
+        groups.add(group)
 
-    def _add_packages_to_index(self, dist, comp, filenames):
+    def _add_packages_to_index(self, group, filenames):
         for hash, filename in filenames.items():
-            self._add_package_to_index(dist, comp, hash, filename)
+            self._add_package_to_index(group, hash, filename)
 
-    def add(self, dist, comp, paths):
+    def add(self, group, paths):
         '''Adds packages to repository.'''
         filenames = self._add_packages_to_pool(paths)
-        self._add_packages_to_index(dist, comp, filenames)
+        self._add_packages_to_index(group, filenames)
 
         # TODO: Remove.
         for filehash in self._index:
@@ -250,16 +250,11 @@ class CommandLineDriver(object):
         repo.init()
 
     def add(self, repo, parser, args):
-        parser.add_argument('component', help='Component name.')
+        parser.add_argument('group', help='Group name.')
         parser.add_argument('package', nargs='+',
                             help='The packages to add.')
         args = parser.parse_args(args)
-
-        comp = args.component.split(':', maxsplit=1)
-        if len(comp) == 1:
-            comp.append('main')
-
-        repo.add(dist=comp[0], comp=comp[1], paths=args.package)
+        repo.add(args.group, args.package)
 
     def execute_command_line(self, args):
         parser = argparse.ArgumentParser(

@@ -14,7 +14,7 @@ makeapt init
 #### Add .deb files to existing repository
 
 ```
-makeapt add <component> <packages>...
+makeapt add <group> <packages>...
 ```
 
 For example:
