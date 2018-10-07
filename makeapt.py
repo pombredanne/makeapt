@@ -138,15 +138,9 @@ class Repository(object):
         return filenames
 
     def _add_package_to_index(self, dist, comp, hash, filename):
-        if hash not in self._index:
-            self._index[hash] = {
-                'filename': filename,
-                'components': set(),
-            }
-
-        entry = self._index[hash]
-        assert entry['filename'] == filename
-        entry['components'].add('%s:%s' % (dist, comp))
+        hash_entry = self._index.setdefault(hash, dict())
+        file_entry = hash_entry.setdefault(filename, set())
+        file_entry.add('%s:%s' % (dist, comp))
 
     def _add_packages_to_index(self, dist, comp, filenames):
         for hash, filename in filenames.items():
@@ -174,11 +168,21 @@ class Repository(object):
 
         return out
 
-    # Retrieves info for a specific package.
+    # Returns full path to one (any) of packages in pool with a
+    # given hash or None, if there are no such files.
+    def _get_path_by_filehash(self, filehash):
+        for filename in self._index[filehash]:
+            path_in_pool = self._get_path_in_pool(filehash, filename)
+            return os.path.join(self._pool_path, path_in_pool)
+
+        return None
+
+    # Retrieves info for packages with a given hash or None if
+    # there are no such packages.
     def _get_deb_info(self, filehash):
-        filename = self._index[filehash]['filename']
-        path_in_pool = self._get_path_in_pool(filehash, filename)
-        path = os.path.join(self._pool_path, path_in_pool)
+        path = self._get_path_by_filehash(filehash)
+        if path is None:
+            return None
 
         # Run 'dpkg-deb' to list the control package fields.
         # TODO: We can run several processes simultaneously.
