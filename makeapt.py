@@ -13,14 +13,25 @@ class Error(Exception):
 
 
 class Repository(object):
+    # Buffer size for file I/O, in bytes.
+    _BUFF_SIZE = 4096
+
     def __init__(self, path='.'):
         self._apt_path = path
+
+    def __enter__(self):
         self._makeapt_path = os.path.join(self._apt_path, '.makeapt')
         self._index_path = os.path.join(self._makeapt_path, 'index')
         self._pool_path = os.path.join(self._apt_path, 'pool')
 
-        # Buffer size for file I/O, in bytes.
-        self._BUFF_SIZE = 4096
+        # TODO: Lock the repository.
+
+        self._load_index()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._save_index()
+        # TODO: Unlock the repository.
 
     def _make_dir(self, path):
         if not os.path.exists(path):
@@ -73,10 +84,10 @@ class Repository(object):
                 f.write(chunk)
 
     def _load_index(self):
-        return self._load_literal(self._index_path, dict())
+        self._index = self._load_literal(self._index_path, dict())
 
-    def _save_index(self, index):
-        self._save_literal(self._index_path, index)
+    def _save_index(self):
+        self._save_literal(self._index_path, self._index)
 
     def _hash_file(self, path, hashfunc):
         msg = hashfunc()
@@ -110,27 +121,25 @@ class Repository(object):
             filenames[hash] = filename
         return filenames
 
-    def _add_package_to_index(self, dist, comp, hash, filename, index):
-        if hash not in index:
-            index[hash] = {
+    def _add_package_to_index(self, dist, comp, hash, filename):
+        if hash not in self._index:
+            self._index[hash] = {
                 'filename': filename,
                 'components': set(),
             }
 
-        entry = index[hash]
+        entry = self._index[hash]
         assert entry['filename'] == filename
         entry['components'].add((dist, comp))
 
-    def _add_packages_to_index(self, dist, comp, filenames, index):
+    def _add_packages_to_index(self, dist, comp, filenames):
         for hash, filename in filenames.items():
-            self._add_package_to_index(dist, comp, hash, filename, index)
+            self._add_package_to_index(dist, comp, hash, filename)
 
     def add(self, dist, comp, paths):
         '''Adds packages to repository.'''
-        index = self._load_index()
         filenames = self._add_packages_to_pool(paths)
-        self._add_packages_to_index(dist, comp, filenames, index)
-        self._save_index(index)
+        self._add_packages_to_index(dist, comp, filenames)
 
 
 class CommandLineDriver(object):
@@ -172,9 +181,8 @@ class CommandLineDriver(object):
             prog='%s %s' % (self._prog_name, args.command),
             description=descr)
 
-        repo = Repository()
-
-        handler(repo, command_parser, command_args)
+        with Repository() as repo:
+            handler(repo, command_parser, command_args)
 
     def run(self):
         self.execute_command_line(sys.argv[1:])
