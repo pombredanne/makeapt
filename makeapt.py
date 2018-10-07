@@ -46,8 +46,8 @@ class Repository(object):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self._save_index()
-        self._save_cache()
+        self._flush_index()
+        self._flush_cache()
         # TODO: Unlock the repository.
 
     def _make_dir(self, path):
@@ -101,16 +101,37 @@ class Repository(object):
                 f.write(chunk)
 
     def _load_index(self):
-        self._index = self._load_literal(self._index_path, dict())
+        index = self._load_literal(self._index_path, dict())
 
-    def _save_index(self):
+        # Filename groups are not stored in index fields because they always
+        # present. Here we add such groups and fix the type of empty groups
+        # that 'literal_eval()' reads as dict's and not set's.
+        for filehash, filenames in index.items():
+            for filename, groups in filenames.items():
+                if isinstance(groups, dict):
+                    assert not groups
+                    groups = set()
+                    filenames[filename] = groups
+                groups.add(filename)
+
+        self._index = index
+
+    def _flush_index(self):
+        # Do not store groups that match filenames as they always
+        # present and can be restored on load.
+        for filehash, filenames in self._index.items():
+            for filename, groups in filenames.items():
+                groups.discard(filename)
+
         self._save_literal(self._index_path, self._index)
+        del self._index
 
     def _load_cache(self):
         self._cache = self._load_literal(self._cache_path, dict())
 
-    def _save_cache(self):
+    def _flush_cache(self):
         self._save_literal(self._cache_path, self._cache)
+        del self._cache
 
     def _hash_file(self, path, hashfunc):
         msg = hashfunc()
@@ -145,20 +166,20 @@ class Repository(object):
             files.setdefault(filehash, set()).add(filename)
         return files
 
-    def _add_package_to_index(self, group, hash, filename):
+    def _add_package_to_index(self, hash, filename):
         filenames = self._index.setdefault(hash, dict())
         groups = filenames.setdefault(filename, set())
-        groups.add(group)
+        groups.add(filename)
 
-    def _add_packages_to_index(self, group, files):
+    def _add_packages_to_index(self, files):
         for filehash, filenames in files.items():
             for filename in filenames:
-                self._add_package_to_index(group, filehash, filename)
+                self._add_package_to_index(filehash, filename)
 
-    def add(self, group, paths):
+    def add(self, paths):
         '''Adds packages to repository.'''
         files = self._add_packages_to_pool(paths)
-        self._add_packages_to_index(group, files)
+        self._add_packages_to_index(files)
 
         # TODO: Remove.
         for filehash in self._index:
@@ -252,11 +273,10 @@ class CommandLineDriver(object):
         repo.init()
 
     def add(self, repo, parser, args):
-        parser.add_argument('group', help='Group name.')
-        parser.add_argument('package', nargs='+',
+        parser.add_argument('path', nargs='+',
                             help='The packages to add.')
         args = parser.parse_args(args)
-        repo.add(args.group, args.package)
+        repo.add(args.path)
 
     def execute_command_line(self, args):
         parser = argparse.ArgumentParser(
