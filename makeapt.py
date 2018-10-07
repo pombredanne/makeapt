@@ -41,38 +41,36 @@ class Repository(object):
         except FileNotFoundError:
             return default
 
-    def _write_indent(self, f, level):
-        f.write('  ' * level)
-
     # Writes a given value in consistent and human-readable way.
-    def _write_literal(self, f, value, level=0):
+    def _emit_literal(self, value, level=0):
+        indent = '  '
+        nested_level = level + 1
         if isinstance(value, dict):
-            f.write('{\n')
-            nested_level = level + 1
+            yield '{\n'
             for key in sorted(value):
-                self._write_indent(f, nested_level)
-                f.write('%r: ' % key)
-                self._write_literal(f, value[key], nested_level)
-            self._write_indent(f, level)
-            f.write('}')
+                yield indent * nested_level
+                yield '%r: ' % key
+                for chunk in self._emit_literal(value[key], nested_level):
+                    yield chunk
+            yield indent * level + '}'
         elif isinstance(value, set):
-            f.write('{\n')
-            nested_level = level + 1
+            yield '{\n'
             for element in sorted(value):
-                self._write_indent(f, nested_level)
-                self._write_literal(f, element, nested_level)
-            self._write_indent(f, level)
-            f.write('}')
+                yield indent * nested_level
+                for chunk in self._emit_literal(element, nested_level):
+                    yield chunk
+            yield indent * level + '}'
         else:
-            f.write(repr(value))
+            yield repr(value)
 
         if level > 0:
-            f.write(',')
-        f.write('\n')
+            yield ','
+        yield '\n'
 
     def _save_literal(self, path, value):
         with open(path, 'w') as f:
-            self._write_literal(f, value)
+            for chunk in self._emit_literal(value):
+                f.write(chunk)
 
     def _load_index(self):
         return self._load_literal(self._index_path, dict())
