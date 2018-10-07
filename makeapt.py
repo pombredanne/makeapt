@@ -181,6 +181,7 @@ class Repository(object):
         path = os.path.join(self._pool_path, path_in_pool)
 
         # Run 'dpkg-deb' to list the control package fields.
+        # TODO: We can run several processes simultaneously.
         output = self._run_shell(['dpkg-deb', '--field', path] +
                                   self.DEB_INFO_FIELDS)
         output = output.decode('utf-8')
