@@ -5,6 +5,7 @@ import ast
 import hashlib
 import os
 import shutil
+import subprocess
 import sys
 
 
@@ -13,6 +14,21 @@ class Error(Exception):
 
 
 class Repository(object):
+    # We prefer these fields always be specified in this order.
+    DEB_INFO_FIELDS = [
+        'Package',
+        'Version',
+        'Section',
+        'Priority',
+        'Architecture',
+        'Installed-Size',
+        'Depends',
+        'Maintainer',
+        'Uploaders',
+        'Homepage',
+        'Description',
+    ]
+
     # Buffer size for file I/O, in bytes.
     _BUFF_SIZE = 4096
 
@@ -140,6 +156,63 @@ class Repository(object):
         '''Adds packages to repository.'''
         filenames = self._add_packages_to_pool(paths)
         self._add_packages_to_index(dist, comp, filenames)
+
+        # TODO: Remove.
+        for filehash in self._index:
+            print(self._get_deb_info(filehash))
+
+    def _run_shell(self, args):
+        child = subprocess.Popen(args,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+
+        out, err = child.communicate()
+
+        if child.returncode:
+            raise Error('subprocess returned %d: %s: %s' % (
+                            child.returncode, ' '.join(args), err))
+
+        return out
+
+    # Retrieves info for a specific package.
+    def _get_deb_info(self, filehash):
+        filename = self._index[filehash]['filename']
+        path_in_pool = self._get_path_in_pool(filehash, filename)
+        path = os.path.join(self._pool_path, path_in_pool)
+
+        # Run 'dpkg-deb' to list the control package fields.
+        output = self._run_shell(['dpkg-deb', '--field', path] +
+                                  self.DEB_INFO_FIELDS)
+        output = output.decode('utf-8')
+
+        # Handle spliced lines.
+        mark = '{makeapt_linebreak}'
+        output = output.replace('\n ', mark + ' ')
+        output = output.split('\n')
+        output = [x.replace(mark, '\n') for x in output if x != '']
+
+        deb_info = dict()
+        for line in output:
+            parts = line.split(':', maxsplit=1)
+            if len(parts) < 2:
+                raise Error('Unexpected control line %r in package %r.' % (
+                                line, filename))
+
+            field, value = tuple(parts)
+            field = field.strip()
+            value = value.strip()
+
+            if field not in self.DEB_INFO_FIELDS:
+                raise Error('Unknown control field %r in package %r.' % (
+                                field, filename))
+
+            if field in deb_info:
+                raise Error('Duplicate control field %r in package %r.' % (
+                                field, filename))
+
+            deb_info[field] = value
+
+        return deb_info
 
 
 class CommandLineDriver(object):
