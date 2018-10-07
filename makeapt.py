@@ -34,19 +34,20 @@ class Repository(object):
 
     def __init__(self, path='.'):
         self._apt_path = path
-
-    def __enter__(self):
         self._makeapt_path = os.path.join(self._apt_path, '.makeapt')
         self._index_path = os.path.join(self._makeapt_path, 'index')
+        self._cache_path = os.path.join(self._makeapt_path, 'cache')
         self._pool_path = os.path.join(self._apt_path, 'pool')
 
+    def __enter__(self):
         # TODO: Lock the repository.
-
         self._load_index()
+        self._load_cache()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self._save_index()
+        self._save_cache()
         # TODO: Unlock the repository.
 
     def _make_dir(self, path):
@@ -105,6 +106,12 @@ class Repository(object):
     def _save_index(self):
         self._save_literal(self._index_path, self._index)
 
+    def _load_cache(self):
+        self._cache = self._load_literal(self._cache_path, dict())
+
+    def _save_cache(self):
+        self._save_literal(self._cache_path, self._cache)
+
     def _hash_file(self, path, hashfunc):
         msg = hashfunc()
         with open(path, 'rb') as f:
@@ -153,7 +160,7 @@ class Repository(object):
 
         # TODO: Remove.
         for filehash in self._index:
-            print(self._get_deb_info(filehash))
+            print(self._get_package_info(filehash))
 
     def _run_shell(self, args):
         child = subprocess.Popen(args,
@@ -179,7 +186,13 @@ class Repository(object):
 
     # Retrieves info for packages with a given hash or None if
     # there are no such packages.
-    def _get_deb_info(self, filehash):
+    def _get_package_info(self, filehash):
+        # See if the info is already cached.
+        if filehash in self._cache:
+            return self._cache[filehash]
+
+        # Get the path to any of the files with the given hash,
+        # if there are some.
         path = self._get_path_by_filehash(filehash)
         if path is None:
             return None
@@ -196,7 +209,7 @@ class Repository(object):
         output = output.split('\n')
         output = [x.replace(mark, '\n') for x in output if x != '']
 
-        deb_info = dict()
+        info = dict()
         for line in output:
             parts = line.split(':', maxsplit=1)
             if len(parts) < 2:
@@ -211,13 +224,16 @@ class Repository(object):
                 raise Error('Unknown control field %r in package %r.' % (
                                 field, filename))
 
-            if field in deb_info:
+            if field in info:
                 raise Error('Duplicate control field %r in package %r.' % (
                                 field, filename))
 
-            deb_info[field] = value
+            info[field] = value
 
-        return deb_info
+        # Cache the results.
+        self._cache[filehash] = info
+
+        return info
 
 
 class CommandLineDriver(object):
