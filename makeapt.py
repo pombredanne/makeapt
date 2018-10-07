@@ -130,7 +130,7 @@ class Repository(object):
 
         entry = self._index[hash]
         assert entry['filename'] == filename
-        entry['components'].add((dist, comp))
+        entry['components'].add('%s:%s' % (dist, comp))
 
     def _add_packages_to_index(self, dist, comp, filenames):
         for hash, filename in filenames.items():
@@ -156,12 +156,16 @@ class CommandLineDriver(object):
         repo.init()
 
     def add(self, repo, parser, args):
-        parser.add_argument('dist', help='Distribution name.')
-        parser.add_argument('comp', help='Component name.')
+        parser.add_argument('component', help='Component name.')
         parser.add_argument('package', nargs='+',
                             help='The packages to add.')
         args = parser.parse_args(args)
-        repo.add(args.dist, args.comp, args.package)
+
+        comp = args.component.split(':', maxsplit=1)
+        if len(comp) == 1:
+            comp.append('main')
+
+        repo.add(dist=comp[0], comp=comp[1], paths=args.package)
 
     def execute_command_line(self, args):
         parser = argparse.ArgumentParser(
