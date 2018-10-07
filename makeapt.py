@@ -138,25 +138,27 @@ class Repository(object):
         return (hash, filename)
 
     def _add_packages_to_pool(self, paths):
-        filenames = dict()
-        for path in paths:
-            hash, filename = self._add_package_to_pool(path)
-            filenames[hash] = filename
-        return filenames
+        unique_paths = set(paths)
+        files = dict()
+        for path in unique_paths:
+            filehash, filename = self._add_package_to_pool(path)
+            files.setdefault(filehash, set()).add(filename)
+        return files
 
     def _add_package_to_index(self, group, hash, filename):
         filenames = self._index.setdefault(hash, dict())
         groups = filenames.setdefault(filename, set())
         groups.add(group)
 
-    def _add_packages_to_index(self, group, filenames):
-        for hash, filename in filenames.items():
-            self._add_package_to_index(group, hash, filename)
+    def _add_packages_to_index(self, group, files):
+        for filehash, filenames in files.items():
+            for filename in filenames:
+                self._add_package_to_index(group, filehash, filename)
 
     def add(self, group, paths):
         '''Adds packages to repository.'''
-        filenames = self._add_packages_to_pool(paths)
-        self._add_packages_to_index(group, filenames)
+        files = self._add_packages_to_pool(paths)
+        self._add_packages_to_index(group, files)
 
         # TODO: Remove.
         for filehash in self._index:
