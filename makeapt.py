@@ -54,7 +54,7 @@ class Repository(object):
 
     # Writes a given value in consistent and human-readable way.
     def _emit_literal(self, value, level=0):
-        indent = '  '
+        indent = ' '
         nested_level = level + 1
         if isinstance(value, dict):
             yield '{\n'
