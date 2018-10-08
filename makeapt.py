@@ -255,11 +255,6 @@ class Repository(object):
 
         return info
 
-    def _get_all_packages(self):
-        for filehash, filenames in self._index.items():
-            for filename, groups in filenames.items():
-                yield (filehash, filename)
-
     def _get_empty_generator(self):
         return (x for x in [])
 
@@ -270,6 +265,11 @@ class Repository(object):
 
     def _get_none_packages(self):
         return self._get_empty_generator()
+
+    def _get_all_packages(self):
+        for filehash, filenames in self._index.items():
+            for filename, groups in filenames.items():
+                yield (filehash, filename)
 
     def _parse_package_spec(self, spec):
         excluding = spec.startswith('!')
