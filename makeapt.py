@@ -153,25 +153,21 @@ class Repository(object):
 
     def _add_packages_to_pool(self, paths):
         unique_paths = set(paths)
-        files = dict()
-        for path in unique_paths:
-            filehash, filename = self._add_package_to_pool(path)
-            files.setdefault(filehash, set()).add(filename)
-        return files
+        return {self._add_package_to_pool(path) for path in unique_paths}
 
-    def _add_package_to_index(self, hash, filename):
-        filenames = self._index.setdefault(hash, dict())
+    def _add_package_to_index(self, filehash, filename):
+        filenames = self._index.setdefault(filehash, dict())
         filenames.setdefault(filename, set())
 
     def _add_packages_to_index(self, files):
-        for filehash, filenames in files.items():
-            for filename in filenames:
-                self._add_package_to_index(filehash, filename)
+        for filehash, filename in files:
+            self._add_package_to_index(filehash, filename)
 
     def add(self, paths):
         '''Adds packages to repository.'''
         files = self._add_packages_to_pool(paths)
         self._add_packages_to_index(files)
+        return files
 
     def _run_shell(self, args):
         child = subprocess.Popen(args,
@@ -311,10 +307,13 @@ class Repository(object):
 
         return packages
 
+    def add_to_group(self, group, files):
+        for filehash, filename in files:
+            self._index[filehash][filename].add(group)
+
     def group(self, group, package_specs):
         '''Makes packages part of a group.'''
-        for filehash, filename in self._enumerate_packages(package_specs):
-            self._index[filehash][filename].add(group)
+        self.add_to_group(group, self._enumerate_packages(package_specs))
 
     def rmgroup(self, group, package_specs):
         '''Excludes packages from a group.'''
@@ -343,10 +342,12 @@ class CommandLineDriver(object):
         repo.init()
 
     def add(self, repo, parser, args):
+        parser.add_argument('group', help='Group name.')
         parser.add_argument('path', nargs='+',
                             help='The package files to add.')
         args = parser.parse_args(args)
-        repo.add(args.path)
+        files = repo.add(args.path)
+        repo.add_to_group(args.group, files)
 
     def group(self, repo, parser, args):
         parser.add_argument('group', help='Group name.')
