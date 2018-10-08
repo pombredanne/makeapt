@@ -274,7 +274,7 @@ class Repository(object):
     def _match_groups(self, file, pattern, invert=False):
         # Consider name and hash of the file to be its implicit groups.
         filehash, filename = file
-        groups = self._index[filehash][filename] | {filename}
+        groups = self._index[filehash][filename] | set(file)
 
         matches = any(self._match_group(group, pattern) for group in groups)
         if invert:
