@@ -104,26 +104,18 @@ class Repository(object):
     def _load_index(self):
         index = self._load_literal(self._index_path, dict())
 
-        # Filename groups are not stored in index fields because they always
-        # present. Here we add such groups and fix the type of empty groups
-        # that 'literal_eval()' reads as dict's and not set's.
+        # Fix the type of empty groups that 'literal_eval()'
+        # reads as dict's and not set's.
         for filehash, filenames in index.items():
             for filename, groups in filenames.items():
                 if isinstance(groups, dict):
                     assert not groups
                     groups = set()
                     filenames[filename] = groups
-                groups.add(filename)
 
         self._index = index
 
     def _flush_index(self):
-        # Do not store groups that match filenames as they always
-        # present and can be restored on load.
-        for filehash, filenames in self._index.items():
-            for filename, groups in filenames.items():
-                groups.discard(filename)
-
         self._save_literal(self._index_path, self._index)
         del self._index
 
@@ -279,17 +271,20 @@ class Repository(object):
     def _match_group(self, group, pattern):
         return fnmatch.fnmatch(group, pattern)
 
-    def _match_groups(self, groups, pattern, invert=False):
+    def _match_groups(self, file, pattern, invert=False):
+        # Consider name and hash of the file to be its implicit groups.
+        filehash, filename = file
+        groups = self._index[filehash][filename] | {filename}
+
         matches = any(self._match_group(group, pattern) for group in groups)
         if invert:
             matches = not matches
         return matches
 
     def _match_packages(self, pattern, packages, invert=False):
-        for filehash, filename in packages:
-            groups = self._index[filehash][filename]
-            if self._match_groups(groups, pattern, invert):
-                yield (filehash, filename)
+        for file in packages:
+            if self._match_groups(file, pattern, invert):
+                yield file
 
     def _apply_package_spec(self, excluding, pattern, packages):
         if excluding:
