@@ -282,15 +282,18 @@ class Repository(object):
     def _match_groups(self, groups, pattern):
         return any(self._match_group(group, pattern) for group in groups)
 
-    def _match_packages(self, pattern, packages):
+    def _match_packages(self, pattern, packages, invert=False):
         for filehash, filename in packages:
             groups = self._index[filehash][filename]
-            if self._match_groups(groups, pattern):
+            matches = self._match_groups(groups, pattern)
+            if invert:
+                matches = not matches
+            if matches:
                 yield (filehash, filename)
 
     def _apply_package_spec(self, excluding, pattern, packages):
         if excluding:
-            return self._match_packages(pattern, packages)
+            return self._match_packages(pattern, packages, invert=True)
 
         return self._cat_generators(
             packages,
