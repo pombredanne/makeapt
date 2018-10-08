@@ -319,6 +319,10 @@ class Repository(object):
         for filehash, filename in self._enumerate_packages(package_specs):
             self._index[filehash][filename].add(group)
 
+    def ls(self, package_specs):
+        '''Lists packages.'''
+        return self._enumerate_packages(package_specs)
+
 
 class CommandLineDriver(object):
     def __init__(self):
@@ -328,6 +332,7 @@ class CommandLineDriver(object):
             'add': (self.add, 'Add .deb files to repository.'),
             'group': (self.group, 'Make packages part of a group.'),
             'init': (self.init, 'Initialize APT repository.'),
+            'ls': (self.ls, 'List packages.'),
         }
 
     def init(self, repo, parser, args):
@@ -346,6 +351,13 @@ class CommandLineDriver(object):
                             help='The packages to add.')
         args = parser.parse_args(args)
         repo.group(args.group, args.package)
+
+    def ls(self, repo, parser, args):
+        parser.add_argument('package', nargs='*',
+                            help='The packages to list.')
+        args = parser.parse_args(args)
+        for filehash, filename in repo.ls(args.package):
+            print(repr(filename))
 
     def execute_command_line(self, args):
         parser = argparse.ArgumentParser(

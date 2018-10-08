@@ -7,3 +7,4 @@ rm -rf .makeapt pool
 ./makeapt.py add deb/*.deb
 ./makeapt.py group bionic:main '*.deb'
 ./makeapt.py group lucid:main
+./makeapt.py ls a*
