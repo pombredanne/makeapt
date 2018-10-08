@@ -295,9 +295,15 @@ class Repository(object):
         if excluding:
             return self._match_packages(pattern, packages, invert=True)
 
-        return self._cat_generators(
-            packages,
-            self._match_packages(pattern, self._get_all_packages()))
+        # Remember files as we output them to avoid duplicates.
+        seen_files = set()
+        for file in packages:
+            seen_files.add(file)
+            yield file
+
+        for file in self._match_packages(pattern, self._get_all_packages()):
+            if file not in seen_files:
+                yield file
 
     def _enumerate_packages(self, package_specs):
         packages = self._get_all_packages()
