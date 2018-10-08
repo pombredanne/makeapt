@@ -279,16 +279,16 @@ class Repository(object):
     def _match_group(self, group, pattern):
         return fnmatch.fnmatch(group, pattern)
 
-    def _match_groups(self, groups, pattern):
-        return any(self._match_group(group, pattern) for group in groups)
+    def _match_groups(self, groups, pattern, invert=False):
+        matches = any(self._match_group(group, pattern) for group in groups)
+        if invert:
+            matches = not matches
+        return matches
 
     def _match_packages(self, pattern, packages, invert=False):
         for filehash, filename in packages:
             groups = self._index[filehash][filename]
-            matches = self._match_groups(groups, pattern)
-            if invert:
-                matches = not matches
-            if matches:
+            if self._match_groups(groups, pattern, invert):
                 yield (filehash, filename)
 
     def _apply_package_spec(self, excluding, pattern, packages):
