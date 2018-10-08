@@ -367,13 +367,7 @@ class CommandLineDriver(object):
         parser.add_argument('package', nargs='*',
                             help='The packages to list.')
         args = parser.parse_args(args)
-
-        files = dict()
-        for filehash, filename in repo.ls(args.package):
-            files[filename] = filehash
-
-        for filename in sorted(files):
-            filehash = files[filename]
+        for filehash, filename in sorted(repo.ls(args.package)):
             print(filehash[:8], filename)
 
     def execute_command_line(self, args):
