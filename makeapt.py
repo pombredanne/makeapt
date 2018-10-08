@@ -293,7 +293,9 @@ class Repository(object):
 
     def _apply_package_spec(self, excluding, pattern, packages):
         if excluding:
-            return self._match_packages(pattern, packages, invert=True)
+            for file in self._match_packages(pattern, packages, invert=True):
+                yield file
+            return
 
         # Remember files as we output them to avoid duplicates.
         seen_files = set()
