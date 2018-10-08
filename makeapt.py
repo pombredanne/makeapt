@@ -316,6 +316,11 @@ class Repository(object):
         for filehash, filename in self._enumerate_packages(package_specs):
             self._index[filehash][filename].add(group)
 
+    def rmgroup(self, group, package_specs):
+        '''Excludes packages from a group.'''
+        for filehash, filename in self._enumerate_packages(package_specs):
+            self._index[filehash][filename].discard(group)
+
     def ls(self, package_specs):
         '''Lists packages.'''
         return self._enumerate_packages(package_specs)
@@ -330,6 +335,7 @@ class CommandLineDriver(object):
             'group': (self.group, 'Make packages part of a group.'),
             'init': (self.init, 'Initialize APT repository.'),
             'ls': (self.ls, 'List packages.'),
+            'rmgroup': (self.rmgroup, 'Excludes packages from a group.'),
         }
 
     def init(self, repo, parser, args):
@@ -348,6 +354,13 @@ class CommandLineDriver(object):
                             help='The packages to add.')
         args = parser.parse_args(args)
         repo.group(args.group, args.package)
+
+    def rmgroup(self, repo, parser, args):
+        parser.add_argument('group', help='Group name.')
+        parser.add_argument('package', nargs='*',
+                            help='The packages to exclude from the group.')
+        args = parser.parse_args(args)
+        repo.rmgroup(args.group, args.package)
 
     def ls(self, repo, parser, args):
         parser.add_argument('package', nargs='*',
