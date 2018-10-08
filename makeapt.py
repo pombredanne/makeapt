@@ -161,8 +161,7 @@ class Repository(object):
 
     def _add_package_to_index(self, hash, filename):
         filenames = self._index.setdefault(hash, dict())
-        groups = filenames.setdefault(filename, set())
-        groups.add(filename)
+        filenames.setdefault(filename, set())
 
     def _add_packages_to_index(self, files):
         for filehash, filenames in files.items():
