@@ -293,19 +293,11 @@ class Repository(object):
 
     def _apply_package_spec(self, excluding, pattern, packages):
         if excluding:
-            for file in self._match_packages(pattern, packages, invert=True):
-                yield file
-            return
+            return self._match_packages(pattern, packages, invert=True)
 
-        # Remember files as we output them to avoid duplicates.
-        seen_files = set()
-        for file in packages:
-            seen_files.add(file)
-            yield file
-
-        for file in self._match_packages(pattern, self._get_all_packages()):
-            if file not in seen_files:
-                yield file
+        return self._cat_generators(
+            packages,
+            self._match_packages(pattern, self._get_all_packages()))
 
     def _enumerate_packages(self, package_specs):
         packages = self._get_all_packages()
@@ -367,8 +359,8 @@ class CommandLineDriver(object):
         parser.add_argument('package', nargs='*',
                             help='The packages to list.')
         args = parser.parse_args(args)
-        files = ((filename, filehash) for
-                     filehash, filename in repo.ls(args.package))
+        files = {(filename, filehash) for
+                     filehash, filename in repo.ls(args.package)}
         for filename, filehash in sorted(files):
             print(filehash[:8], filename)
 
