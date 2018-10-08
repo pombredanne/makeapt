@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import fnmatch
 import hashlib
 import os
 import shutil
@@ -181,10 +182,6 @@ class Repository(object):
         files = self._add_packages_to_pool(paths)
         self._add_packages_to_index(files)
 
-        # TODO: Remove.
-        for filehash in self._index:
-            print(self._get_package_info(filehash))
-
     def _run_shell(self, args):
         child = subprocess.Popen(args,
                                  stdout=subprocess.PIPE,
@@ -258,13 +255,78 @@ class Repository(object):
 
         return info
 
+    def _get_all_packages(self):
+        for filehash, filenames in self._index.items():
+            for filename, groups in filenames.items():
+                yield (filehash, filename)
+
+    def _get_empty_generator(self):
+        return (x for x in [])
+
+    def _cat_generators(self, *generators):
+        for g in generators:
+            for i in g:
+                yield i
+
+    def _get_none_packages(self):
+        return self._get_empty_generator()
+
+    def _parse_package_spec(self, spec):
+        excluding = spec.startswith('!')
+        pattern = spec if not excluding else spec[1:]
+        return (excluding, pattern)
+
+    def _match_group(self, group, pattern):
+        return fnmatch.fnmatch(group, pattern)
+
+    def _match_groups(self, groups, pattern):
+        return any(self._match_group(group, pattern) for group in groups)
+
+    def _match_packages(self, pattern, packages):
+        for filehash, filename in packages:
+            groups = self._index[filehash][filename]
+            if self._match_groups(groups, pattern):
+                yield (filehash, filename)
+
+    def _apply_package_spec(self, excluding, pattern, packages):
+        if excluding:
+            return self._match_packages(pattern, packages)
+
+        return self._cat_generators(
+            packages,
+            self._match_packages(pattern, self._get_all_packages()))
+
+    def _enumerate_packages(self, package_specs):
+        packages = self._get_all_packages()
+
+        first = True
+        for spec in package_specs:
+            excluding, pattern = self._parse_package_spec(spec)
+
+            # If the first specifier is including, use it instead of
+            # considering all packages.
+            if first and not excluding:
+                packages = self._get_none_packages()
+
+            packages = self._apply_package_spec(excluding, pattern, packages)
+
+            first = False
+
+        return packages
+
+    def group(self, group, package_specs):
+        '''Makes packages part of a group.'''
+        for filehash, filename in self._enumerate_packages(package_specs):
+            self._index[filehash][filename].add(group)
+
 
 class CommandLineDriver(object):
     def __init__(self):
         self._prog_name = os.path.basename(sys.argv[0])
 
         self.COMMANDS = {
-            'add': (self.add, 'Add .deb packages to repository.'),
+            'add': (self.add, 'Add .deb files to repository.'),
+            'group': (self.group, 'Make packages part of a group.'),
             'init': (self.init, 'Initialize APT repository.'),
         }
 
@@ -274,14 +336,21 @@ class CommandLineDriver(object):
 
     def add(self, repo, parser, args):
         parser.add_argument('path', nargs='+',
-                            help='The packages to add.')
+                            help='The package files to add.')
         args = parser.parse_args(args)
         repo.add(args.path)
+
+    def group(self, repo, parser, args):
+        parser.add_argument('group', help='Group name.')
+        parser.add_argument('package', nargs='*',
+                            help='The packages to add.')
+        args = parser.parse_args(args)
+        repo.group(args.group, args.package)
 
     def execute_command_line(self, args):
         parser = argparse.ArgumentParser(
             prog=self._prog_name,
-            description='Debian APT repositories generator')
+            description='Debian APT repositories generator.')
         parser.add_argument('command', help='The command to run.')
 
         command = sys.argv[1:2]
