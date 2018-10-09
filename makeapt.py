@@ -414,15 +414,15 @@ class Repository(object):
         return tuple(parts) if len(parts) == 2 else None
 
     def _get_all_distribution_components(self):
-        distributions = dict()
+        dists = dict()
         for filehash, filename, groups in self._get_all_packages():
             for group in groups:
                 parts = self._parse_distribution_component_group(group)
                 if not parts:
                     continue
 
-                distribution, component = parts
-                components = distributions.setdefault(distribution, dict())
+                dist, component = parts
+                components = dists.setdefault(dist, dict())
                 archs = components.setdefault(component, dict())
                 arch = self._get_package_arch(filehash)
                 filenames = archs.setdefault(arch, dict())
@@ -433,7 +433,7 @@ class Repository(object):
 
                 filenames[filename] = filehash
 
-        return distributions
+        return dists
 
     def _generate_package_index(self, file):
         # Emit the control fields from the deb file itself. Note that we want
@@ -460,14 +460,14 @@ class Repository(object):
             for chunk in self._generate_package_index((filehash, filename)):
                 yield chunk
 
-    def _index_architecture(self, distribution, component, arch, files):
-        path = os.path.join(self._dists_path, distribution, component,
+    def _index_architecture(self, dist, component, arch, files):
+        path = os.path.join(self._dists_path, dist, component,
                             'binary-%s' % arch, 'Packages')
         self._save_file(path, self._generate_packages_index(files))
 
-    def _index_distribution_component(self, distribution, component, archs):
+    def _index_distribution_component(self, dist, component, archs):
         for arch, files in archs.items():
-            self._index_architecture(distribution, component, arch, files)
+            self._index_architecture(dist, component, arch, files)
 
         # Generate package indexes.
         '''
@@ -475,17 +475,17 @@ class Repository(object):
             for arch in archs:
         '''
 
-    def _index_distribution(self, distribution, components):
+    def _index_distribution(self, dist, components):
         # Generate component-specific indexes.
         for component, archs in components.items():
-            self._index_distribution_component(distribution, component, archs)
+            self._index_distribution_component(dist, component, archs)
 
     def index(self):
         '''Generates APT indexes.'''
         # TODO: Remove the whole 'dists' directory before re-indexing.
-        distributions = self._get_all_distribution_components()
-        for distribution, components in distributions.items():
-            self._index_distribution(distribution, components)
+        dists = self._get_all_distribution_components()
+        for dist, components in dists.items():
+            self._index_distribution(dist, components)
 
 
 class CommandLineDriver(object):
