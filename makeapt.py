@@ -44,6 +44,7 @@ class Repository(object):
     # canonical names.
     _CANONICAL_HASH_NAMES = {
         'md5': 'md5',
+        'MD5Sum': 'md5',
         'MD5sum': 'md5',
         'sha1': 'sha1',
         'SHA1': 'sha1',
@@ -96,9 +97,23 @@ class Repository(object):
 
     def _save_file(self, path, content):
         self._make_file_dir(path)
-        with open(path, 'w') as f:
+        with open(path, 'wb') as f:
             for chunk in content:
+                if isinstance(chunk, str):
+                    chunk = chunk.encode('ascii')
                 f.write(chunk)
+
+    def _gzip(self, path):
+        # TODO: Can _run_shell() return a generator?
+        # TODO: Should we do that with a Python library?
+        yield self._run_shell(['gzip', '--keep', '--best', '--no-name',
+                               '--stdout', path])
+
+    def _bzip2(self, path):
+        # TODO: Can _run_shell() return a generator?
+        # TODO: Should we do that with a Python library?
+        yield self._run_shell(['bzip2', '--keep', '--best',
+                               '--stdout', path])
 
     def init(self):
         '''Initializes APT repository.'''
@@ -191,6 +206,10 @@ class Repository(object):
         self._make_file_dir(dest)
         if overwrite or not os.path.exists(dest):
             shutil.copyfile(src, dest)
+
+    def _link_or_copy_file(self, src, dest):
+        # TODO: Use links by default and fallback to copies on an option.
+        self._copy_file(src, dest)
 
     def _get_path_in_pool(self, file):
         filehash, filename = file
@@ -460,19 +479,38 @@ class Repository(object):
             for chunk in self._generate_package_index((filehash, filename)):
                 yield chunk
 
-    def _save_index_file(self, dist, path_in_dist, index):
+    def _save_index_file(self, dist, path_in_dist, content, dist_index):
         path = os.path.join(self._dists_path, dist, path_in_dist)
-        self._save_file(path, index)
+        self._save_file(path, content)
+        dist_index.add(path_in_dist)
 
-    def _index_architecture(self, dist, component, arch, files):
+        # Create by-hash copies.
+        hash_names = ['MD5Sum',  # Note the uppercase 'S'.
+                      'SHA256']
+        for hash_name, hash in self._hash_file(path, hash_names).items():
+            dir = os.path.dirname(path)
+            dest_path = os.path.join(dir, 'by-hash', hash_name, hash)
+            self._link_or_copy_file(path, dest_path)
+
+        return path
+
+    def _save_index(self, dist, path_in_dist, index, dist_index):
+        path = self._save_index_file(dist, path_in_dist, index, dist_index)
+        self._save_index_file(dist, path_in_dist + '.gz', self._gzip(path),
+                              dist_index)
+        self._save_index_file(dist, path_in_dist + '.bz2', self._bzip2(path),
+                              dist_index)
+
+    def _index_architecture(self, dist, component, arch, files, dist_index):
         path_in_dist = os.path.join(component, 'binary-%s' % arch, 'Packages')
         index = self._generate_packages_index(files)
-        self._save_index_file(dist, path_in_dist, index)
+        self._save_index(dist, path_in_dist, index, dist_index)
 
     def _index_distribution_component(self, dist, component, archs):
-        dist_index = dict()
+        dist_index = set()
         for arch, files in archs.items():
-            self._index_architecture(dist, component, arch, files)
+            self._index_architecture(dist, component, arch, files, dist_index)
+        print(dist_index)
 
     def _index_distribution(self, dist, components):
         # Generate component-specific indexes.
