@@ -460,20 +460,19 @@ class Repository(object):
             for chunk in self._generate_package_index((filehash, filename)):
                 yield chunk
 
+    def _save_index_file(self, dist, path_in_dist, index):
+        path = os.path.join(self._dists_path, dist, path_in_dist)
+        self._save_file(path, index)
+
     def _index_architecture(self, dist, component, arch, files):
-        path = os.path.join(self._dists_path, dist, component,
-                            'binary-%s' % arch, 'Packages')
-        self._save_file(path, self._generate_packages_index(files))
+        path_in_dist = os.path.join(component, 'binary-%s' % arch, 'Packages')
+        index = self._generate_packages_index(files)
+        self._save_index_file(dist, path_in_dist, index)
 
     def _index_distribution_component(self, dist, component, archs):
+        dist_index = dict()
         for arch, files in archs.items():
             self._index_architecture(dist, component, arch, files)
-
-        # Generate package indexes.
-        '''
-        for component in components:
-            for arch in archs:
-        '''
 
     def _index_distribution(self, dist, components):
         # Generate component-specific indexes.
