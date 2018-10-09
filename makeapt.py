@@ -501,10 +501,21 @@ class Repository(object):
         self._save_index_file(dist, path_in_dist + '.bz2', self._bzip2(path),
                               dist_index)
 
+    def _generate_release_index(self, dist, component, arch):
+        yield 'Origin: Default Origin\n'  # TODO
+        yield 'Label: Default Label\n'  # TODO
+        yield 'Component: %s\n' % component
+        yield 'Architecture: %s\n' % arch
+        yield 'Acquire-By-Hash: yes\n'  # TODO: Should be configurable.
+
     def _index_architecture(self, dist, component, arch, files, dist_index):
-        path_in_dist = os.path.join(component, 'binary-%s' % arch, 'Packages')
-        index = self._generate_packages_index(files)
-        self._save_index(dist, path_in_dist, index, dist_index)
+        dir_in_dist = os.path.join(component, 'binary-%s' % arch)
+        self._save_index(dist, os.path.join(dir_in_dist, 'Packages'),
+                         self._generate_packages_index(files), dist_index)
+
+        release_index = self._generate_release_index(dist, component, arch)
+        self._save_index_file(dist, os.path.join(dir_in_dist, 'Release'),
+                              release_index, dist_index)
 
     def _index_distribution_component(self, dist, component, archs):
         dist_index = set()

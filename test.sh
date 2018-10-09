@@ -1,5 +1,5 @@
 set -e
-rm -rf .makeapt pool
+rm -rf .makeapt pool dists
 ./makeapt.py init
 
 ./makeapt.py add xenial:main `ls deb/*.deb | head -n1`
