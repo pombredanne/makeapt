@@ -12,3 +12,8 @@ rm -rf .makeapt pool
 ./makeapt.py ls 'dc99bf09*'
 ./makeapt.py rmgroup lucid:main '*amd64*' '*i386*'
 ./makeapt.py ls lucid:main
+./makeapt.py rmgroup bionic:main 'dc99bf09*'
+./makeapt.py rmgroup xenial:main 'dc99bf09*'
+./makeapt.py rmgroup bionic:main 'c96f389e*'
+./makeapt.py rmgroup xenial:main 'c96f389e*'
+./makeapt.py index
