@@ -215,6 +215,9 @@ class Repository(object):
         filehash, filename = file
         return os.path.join(filehash[:2], filehash[2:], filename)
 
+    def _get_full_package_path(self, file):
+        return os.path.join(self._pool_path, self._get_path_in_pool(file))
+
     def _add_package_to_pool(self, path):
         filehash = self._hash_file(path, self._KEY_HASH_NAME)
         filename = os.path.basename(path)
@@ -256,11 +259,20 @@ class Repository(object):
     def _get_all_packages(self):
         for filehash, filenames in self._index.items():
             for filename, groups in filenames.items():
-                yield (filehash, filename, groups)
+                yield ((filehash, filename), groups)
 
     def _get_all_package_files(self):
-        for filehash, filename, groups in self._get_all_packages():
+        for file, groups in self._get_all_packages():
+            yield file
+
+    def _get_package_files_by_hash(self, filehash):
+        for filename in self._index[filehash]:
             yield (filehash, filename)
+
+    def _get_any_package_file_by_hash(self, filehash):
+        for file in self._get_package_files_by_hash(filehash):
+            return file
+        return None
 
     def _parse_package_spec(self, spec):
         excluding = spec.startswith('!')
@@ -341,15 +353,6 @@ class Repository(object):
 
         return out
 
-    # Returns full path to one (any) of packages in pool with a
-    # given hash or None, if there are no such files.
-    def _get_path_by_filehash(self, filehash):
-        for filename in self._index[filehash]:
-            path_in_pool = self._get_path_in_pool((filehash, filename))
-            return os.path.join(self._pool_path, path_in_pool)
-
-        return None
-
     def _is_key_hash_name(self, hash_name):
         return self._CANONICAL_HASH_NAMES[hash_name] == self._KEY_HASH_NAME
 
@@ -357,21 +360,10 @@ class Repository(object):
         return (self._MAKEAPT_FIELD_PREFIX +
                     self._CANONICAL_HASH_NAMES[hash_name])
 
-    # Retrieves info for packages with a given hash or None if
-    # there are no such packages.
-    def _get_package_info(self, filehash):
-        # See if the info is already cached.
-        if filehash in self._cache:
-            return self._cache[filehash]
-
-        # Get the path to any of the files with the given hash,
-        # if there are some.
-        path = self._get_path_by_filehash(filehash)
-        if path is None:
-            return None
-
+    def _get_deb_info(self, file):
         # Run 'dpkg-deb' to list the control package fields.
         # TODO: We can run several processes simultaneously.
+        path = self._get_full_package_path(file)
         output = self._run_shell(['dpkg-deb', '--field', path] +
                                   self._DEB_INFO_FIELDS)
         output = output.decode('utf-8')
@@ -382,10 +374,11 @@ class Repository(object):
         output = output.split('\n')
         output = [x.replace(mark, '\n') for x in output if x != '']
 
+        filehash, filename = file
         info = dict()
         for line in output:
             parts = line.split(':', maxsplit=1)
-            if len(parts) < 2:
+            if len(parts) != 2:
                 raise Error('Unexpected control line %r in package %r.' % (
                                 line, filename))
 
@@ -405,6 +398,23 @@ class Repository(object):
 
         # TODO: Make sure all the necessary fields are in place.
 
+        return info
+
+    # Retrieves info for packages with a given hash or None if
+    # there are no such packages.
+    def _get_package_info(self, filehash):
+        # See if the info is already cached.
+        if filehash in self._cache:
+            return self._cache[filehash]
+
+        # Get any package with the given hash, if there are some.
+        file = self._get_any_package_file_by_hash(filehash)
+        if file is None:
+            return None
+
+        info = self._get_deb_info(file)
+
+        path = self._get_full_package_path(file)
         info[self._FILESIZE_FIELD] = os.path.getsize(path)
 
         hashes = self._hash_file(path, {'md5', 'sha1', 'sha256', 'sha512'})
@@ -434,7 +444,7 @@ class Repository(object):
 
     def _get_all_distribution_components(self):
         dists = dict()
-        for filehash, filename, groups in self._get_all_packages():
+        for (filehash, filename), groups in self._get_all_packages():
             for group in groups:
                 parts = self._parse_distribution_component_group(group)
                 if not parts:
