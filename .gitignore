@@ -1,5 +1,7 @@
 .makeapt
 deb
 deb2
+makeapt.egg-info
 pool
+dist
 dists
