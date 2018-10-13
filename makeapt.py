@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import datetime
 import fnmatch
 import hashlib
 import os
@@ -68,6 +69,12 @@ class Repository(object):
 
     # The hash algorithm used to find identical packages.
     _KEY_HASH_NAME = _CANONICAL_HASH_NAMES['sha1']
+
+    # The names of hashes used in main distribution indexes. Come
+    # in order we want them in the index files.
+    _DISTRIBUTION_INDEX_HASH_NAMES = [
+        'MD5Sum',  # Note the uppercase 'S' in 'MD5Sum'.
+        'SHA1', 'SHA256']
 
     # Buffer size for file I/O, in bytes.
     _BUFF_SIZE = 4096
@@ -519,7 +526,12 @@ class Repository(object):
                          add_to_by_hash_dir=True):
         path = os.path.join(self._dists_path, dist, path_in_dist)
         self._save_file(path, content)
-        dist_index.add(path_in_dist)
+
+        # Remember the hashes and the size of the resulting file.
+        assert path_in_dist not in dist_index
+        hashes = self._hash_file(path, self._DISTRIBUTION_INDEX_HASH_NAMES)
+        filesize = os.path.getsize(path)
+        dist_index[path_in_dist] = hashes, filesize
 
         # Create by-hash copies.
         if add_to_by_hash_dir:
@@ -616,9 +628,29 @@ class Repository(object):
         for arch, files in archs.items():
             self._index_architecture(dist, component, arch, files, dist_index)
 
+    def _generate_distribution_index(self, dist, components, archs,
+                                     dist_index):
+        yield 'Origin: Default Origin\n'  # TODO
+        yield 'Label: Default Label\n'  # TODO
+        yield 'Suite: %s\n' % dist
+        yield 'Codename: %s\n' % dist
+
+        now = datetime.datetime.utcnow()
+        yield 'Date: %s\n' % now.strftime('%a, %d %b %Y %H:%M:%S +0000')
+
+        yield 'Components: %s\n' % ' '.join(sorted(components))
+        yield 'Architectures: %s\n' % ' '.join(sorted(archs))
+        yield 'Acquire-By-Hash: yes\n'
+
+        for hash_name in self._DISTRIBUTION_INDEX_HASH_NAMES:
+            yield '%s:\n' % hash_name
+            for index in sorted(dist_index):
+                hashes, filesize = dist_index[index]
+                yield ' %s %s %s\n' % (hashes[hash_name], filesize, index)
+
     def _index_distribution(self, dist, components):
         # Generate component-specific indexes.
-        dist_index = set()
+        dist_index = dict()
         for component, archs in components.items():
             self._index_distribution_component(dist, component, archs,
                                                dist_index)
@@ -633,7 +665,11 @@ class Repository(object):
             self._save_contents_index(dist, arch, files, path_in_dist='',
                                       dist_index=dist_index)
 
-        print(dist_index)
+        # Generate distribution index.
+        path = os.path.join(self._dists_path, dist, 'Release')
+        index = self._generate_distribution_index(dist, components, dist_archs,
+                                                  dist_index)
+        self._save_file(path, index)
 
     def index(self):
         '''Generates APT indexes.'''
