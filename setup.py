@@ -15,7 +15,7 @@ setuptools.setup(
     author='Ivan Kosarev',
     author_email='ivan@kosarev.info',
     license='MIT',
-    keywords='text macro processing',
+    keywords='debian apt repository',
     url='https://github.com/kosarev/makeapt',
     entry_points={
         'console_scripts': [
