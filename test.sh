@@ -16,4 +16,6 @@ rm -rf .makeapt pool dists
 ./makeapt.py rmgroup xenial:main 'dc99bf09*'
 ./makeapt.py rmgroup bionic:main 'c96f389e*'
 ./makeapt.py rmgroup xenial:main 'c96f389e*'
+./makeapt.py config origin 'My Origin'
+./makeapt.py config label 'My Label'
 ./makeapt.py index
