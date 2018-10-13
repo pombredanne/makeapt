@@ -15,16 +15,19 @@ class Error(Exception):
 
 
 class Repository(object):
+    _PACKAGE_FIELD = 'Package'
+    _SECTION_FIELD = 'Section'
     _ARCH_FIELD = 'Architecture'
 
     _MAKEAPT_FIELD_PREFIX = '__'
+    _CONTENTS_FIELD = '%scontents' % _MAKEAPT_FIELD_PREFIX
     _FILESIZE_FIELD = '%sfilesize' % _MAKEAPT_FIELD_PREFIX
 
     # We prefer these fields always be specified in this order.
     _DEB_INFO_FIELDS = [
-        'Package',
+        _PACKAGE_FIELD,
         'Version',
-        'Section',
+        _SECTION_FIELD,
         'Priority',
         _ARCH_FIELD,
         'Installed-Size',
@@ -360,7 +363,7 @@ class Repository(object):
         return (self._MAKEAPT_FIELD_PREFIX +
                     self._CANONICAL_HASH_NAMES[hash_name])
 
-    def _get_deb_info(self, file):
+    def _get_deb_control_info(self, file):
         # Run 'dpkg-deb' to list the control package fields.
         # TODO: We can run several processes simultaneously.
         path = self._get_full_package_path(file)
@@ -400,6 +403,25 @@ class Repository(object):
 
         return info
 
+    def _get_deb_contents(self, file):
+        path = self._get_full_package_path(file)
+        out = self._run_shell(['dpkg-deb', '--contents', path])
+        out = out.decode('utf-8').split('\n')
+
+        # Remove empty lines.
+        out = [line for line in out if line]
+
+        # Get only filenames.
+        out = [line.split()[5] for line in out]
+
+        # Strip directories.
+        out = [line for line in out if not line.endswith('/')]
+
+        # Strip './' in the beginning of paths.
+        out = [line[2:] if line.startswith('./') else line for line in out]
+
+        return set(out)
+
     # Retrieves info for packages with a given hash or None if
     # there are no such packages.
     def _get_package_info(self, filehash):
@@ -412,7 +434,9 @@ class Repository(object):
         if file is None:
             return None
 
-        info = self._get_deb_info(file)
+        info = self._get_deb_control_info(file)
+
+        info[self._CONTENTS_FIELD] = self._get_deb_contents(file)
 
         path = self._get_full_package_path(file)
         info[self._FILESIZE_FIELD] = os.path.getsize(path)
@@ -429,14 +453,16 @@ class Repository(object):
         return info
 
     def _get_package_arch(self, filehash):
-        return self._get_package_info(filehash)[self._ARCH_FIELD]
+        package_info = self._get_package_info(filehash)
+        return package_info[self._ARCH_FIELD]
 
     def _get_package_hash(self, filehash, hash_name):
         if self._is_key_hash_name(hash_name):
             return filehash
 
+        package_info = self._get_package_info(filehash)
         field = self._get_hash_field_name(hash_name)
-        return self._get_package_info(filehash)[field]
+        return package_info[field]
 
     def _parse_distribution_component_group(self, group):
         parts = group.split(':')
@@ -504,12 +530,21 @@ class Repository(object):
 
         return path
 
-    def _save_index(self, dist, path_in_dist, index, dist_index):
+    def _save_index(self, dist, path_in_dist, index, dist_index,
+                    create_compressed_versions=True,
+                    keep_uncompressed_version=True):
         path = self._save_index_file(dist, path_in_dist, index, dist_index)
-        self._save_index_file(dist, path_in_dist + '.gz', self._gzip(path),
-                              dist_index)
-        self._save_index_file(dist, path_in_dist + '.bz2', self._bzip2(path),
-                              dist_index)
+        if create_compressed_versions:
+            self._save_index_file(dist, path_in_dist + '.gz',
+                                  self._gzip(path), dist_index)
+            self._save_index_file(dist, path_in_dist + '.bz2',
+                                  self._bzip2(path), dist_index)
+
+        # Note that the uncompressed version goes to the
+        # distribution index even if it doesn't present in the
+        # repository.
+        if not keep_uncompressed_version:
+            os.remove(path)
 
     def _generate_release_index(self, dist, component, arch):
         yield 'Origin: Default Origin\n'  # TODO
@@ -518,14 +553,53 @@ class Repository(object):
         yield 'Architecture: %s\n' % arch
         yield 'Acquire-By-Hash: yes\n'  # TODO: Should be configurable.
 
+    def _generate_contents_index(self, files):
+        index = dict()
+        for filename, filehash in files.items():
+            package_info = self._get_package_info(filehash)
+            location = '%s/%s' % (package_info[self._SECTION_FIELD],
+                                  package_info[self._PACKAGE_FIELD])
+
+            # TODO: Debian documentation reads so that use of the
+            # area name part is deprecated. Despite that, Debian
+            # archvies still seem to be using them. So do we.
+            # https://wiki.debian.org/DebianRepository/Format?action=show&redirect=RepositoryFormat#A.22Contents.22_indices
+            # http://ftp.debian.org/debian/dists/stable/non-free/Contents-i386.gz
+            # location = '/'.join(location.split('/')[1:])
+
+            contents = package_info[self._CONTENTS_FIELD]
+            for contents_filename in contents:
+                index.setdefault(contents_filename, set()).add(location)
+
+        if not index:
+            return
+
+        yield 'FILE LOCATION\n'
+        for contents_filename in sorted(index):
+            locations = ','.join(sorted(index[contents_filename]))
+            yield '%s %s\n' % (contents_filename, locations)
+
     def _index_architecture(self, dist, component, arch, files, dist_index):
+        # Generate packages index.
         dir_in_dist = os.path.join(component, 'binary-%s' % arch)
         self._save_index(dist, os.path.join(dir_in_dist, 'Packages'),
                          self._generate_packages_index(files), dist_index)
 
+        # Generate release index.
         release_index = self._generate_release_index(dist, component, arch)
-        self._save_index_file(dist, os.path.join(dir_in_dist, 'Release'),
-                              release_index, dist_index)
+        self._save_index(dist, os.path.join(dir_in_dist, 'Release'),
+                         release_index, dist_index,
+                         create_compressed_versions=False)
+
+        # Generate contents index. Note that according to the
+        # Debian specification, we have to add the uncompressed
+        # version of the index to the 'Release' index regardless
+        # of whether we store the first. This way apt clients can
+        # check indexes both before and after decompression.
+        contents_index = self._generate_contents_index(files)
+        self._save_index(dist, os.path.join(component, 'Contents-%s' % arch),
+                         contents_index, dist_index,
+                         keep_uncompressed_version=False)
 
     def _index_distribution_component(self, dist, component, archs):
         dist_index = set()
