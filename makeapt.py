@@ -107,6 +107,18 @@ class Repository(object):
         self._flush_config()
         # TODO: Unlock the repository.
 
+    def get_config(self):
+        # Always return a copy of the actual config.
+        config_copy = dict(self._config)
+        return config_copy
+
+    def get_config_field(self, field):
+        config = self.get_config()
+        return config[field]
+
+    def set_config_field(self, field, value):
+        self._config[field] = value
+
     def _make_dir(self, path):
         if not os.path.exists(path):
             os.makedirs(path)
@@ -708,6 +720,7 @@ class CommandLineDriver(object):
         self._prog_name = os.path.basename(sys.argv[0])
 
         self.COMMANDS = {
+            'config': (self.config, 'List or set configuration fields.'),
             'add': (self.add, 'Add .deb files to repository.'),
             'group': (self.group, 'Make packages part of a group.'),
             'index': (self.index, 'Generate APT index files.'),
@@ -754,6 +767,25 @@ class CommandLineDriver(object):
     def index(self, repo, parser, args):
         args = parser.parse_args(args)
         repo.index()
+
+    def _print_config_field(self, field, value):
+        print('%s=%s' % (field, value))
+
+    def config(self, repo, parser, args):
+        parser.add_argument('field', nargs='?',
+                            help='The field to display or set.')
+        parser.add_argument('value', nargs='?',
+                            help='The new value to set to the field.')
+        args = parser.parse_args(args)
+        if args.field and args.value:
+            repo.set_config_field(args.field, args.value)
+        elif args.field:
+            value = repo.get_config_field(args.field)
+            self._print_config_field(args.field, value)
+        else:
+            config = repo.get_config()
+            for field in sorted(config):
+                self._print_config_field(field, config[field])
 
     def execute_command_line(self, args):
         parser = argparse.ArgumentParser(

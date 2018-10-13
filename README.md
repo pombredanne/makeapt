@@ -3,28 +3,36 @@
 Debian APT repositories generator
 
 
-## Usage
+## Usage examples
 
-#### Create new empty APT repository
+#### Creating new empty APT repository
 
 ```
 makeapt init
 ```
 
-#### Add .deb files to existing repository
-
-```
-makeapt add <group> <paths>...
-```
-
-For example:
+#### Adding .deb files to existing repository
 
 ```
 makeapt add bionic:main packages/*.deb
 ```
 
-#### Generate repository indexes
+#### Generating repository indexes
 
 ```
 makeapt index
+```
+
+#### Displaying current configuration
+
+```
+makeapt config
+```
+
+#### Setting custom origin and label values
+
+```
+makeapt config origin 'My Origin'
+makeapt config label 'My Label'
+makeapt index  # Re-generate indexes.
 ```
