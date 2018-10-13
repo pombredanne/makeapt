@@ -1,4 +1,5 @@
 .makeapt
+__pycache__
 deb
 deb2
 makeapt.egg-info
