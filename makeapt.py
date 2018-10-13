@@ -515,25 +515,29 @@ class Repository(object):
             for chunk in self._generate_package_index((filehash, filename)):
                 yield chunk
 
-    def _save_index_file(self, dist, path_in_dist, content, dist_index):
+    def _save_index_file(self, dist, path_in_dist, content, dist_index,
+                         add_to_by_hash_dir=True):
         path = os.path.join(self._dists_path, dist, path_in_dist)
         self._save_file(path, content)
         dist_index.add(path_in_dist)
 
         # Create by-hash copies.
-        hash_names = ['MD5Sum',  # Note the uppercase 'S'.
-                      'SHA256']
-        for hash_name, hash in self._hash_file(path, hash_names).items():
-            dir = os.path.dirname(path)
-            dest_path = os.path.join(dir, 'by-hash', hash_name, hash)
-            self._link_or_copy_file(path, dest_path)
+        if add_to_by_hash_dir:
+            hash_names = ['MD5Sum',  # Note the uppercase 'S'.
+                          'SHA256']
+            for hash_name, hash in self._hash_file(path, hash_names).items():
+                dir = os.path.dirname(path)
+                dest_path = os.path.join(dir, 'by-hash', hash_name, hash)
+                self._link_or_copy_file(path, dest_path)
 
         return path
 
     def _save_index(self, dist, path_in_dist, index, dist_index,
                     create_compressed_versions=True,
                     keep_uncompressed_version=True):
-        path = self._save_index_file(dist, path_in_dist, index, dist_index)
+        path = self._save_index_file(
+            dist, path_in_dist, index, dist_index,
+            add_to_by_hash_dir=keep_uncompressed_version)
         if create_compressed_versions:
             self._save_index_file(dist, path_in_dist + '.gz',
                                   self._gzip(path), dist_index)
@@ -579,6 +583,18 @@ class Repository(object):
             locations = ','.join(sorted(index[contents_filename]))
             yield '%s %s\n' % (contents_filename, locations)
 
+    def _save_contents_index(self, dist, arch, files, path_in_dist,
+                             dist_index):
+        # Note that according to the Debian specification, we
+        # have to add the uncompressed version of the index to
+        # the release index regardless of whether we store the
+        # first. This way apt clients can check indexes both
+        # before and after decompression.
+        contents_index = self._generate_contents_index(files)
+        path = os.path.join(path_in_dist, 'Contents-%s' % arch)
+        self._save_index(dist, path, contents_index, dist_index,
+                         keep_uncompressed_version=False)
+
     def _index_architecture(self, dist, component, arch, files, dist_index):
         # Generate packages index.
         dir_in_dist = os.path.join(component, 'binary-%s' % arch)
@@ -591,26 +607,33 @@ class Repository(object):
                          release_index, dist_index,
                          create_compressed_versions=False)
 
-        # Generate contents index. Note that according to the
-        # Debian specification, we have to add the uncompressed
-        # version of the index to the 'Release' index regardless
-        # of whether we store the first. This way apt clients can
-        # check indexes both before and after decompression.
-        contents_index = self._generate_contents_index(files)
-        self._save_index(dist, os.path.join(component, 'Contents-%s' % arch),
-                         contents_index, dist_index,
-                         keep_uncompressed_version=False)
+        # Generate component contents index.
+        self._save_contents_index(dist, arch, files, path_in_dist=component,
+                                  dist_index=dist_index)
 
-    def _index_distribution_component(self, dist, component, archs):
-        dist_index = set()
+    def _index_distribution_component(self, dist, component, archs,
+                                      dist_index):
         for arch, files in archs.items():
             self._index_architecture(dist, component, arch, files, dist_index)
-        print(dist_index)
 
     def _index_distribution(self, dist, components):
         # Generate component-specific indexes.
+        dist_index = set()
         for component, archs in components.items():
-            self._index_distribution_component(dist, component, archs)
+            self._index_distribution_component(dist, component, archs,
+                                               dist_index)
+
+        # Generate distribution contents indexes.
+        dist_archs = dict()
+        for component, archs in components.items():
+            for arch, files in archs.items():
+                dist_archs.setdefault(arch, dict()).update(files)
+
+        for arch, files in dist_archs.items():
+            self._save_contents_index(dist, arch, files, path_in_dist='',
+                                      dist_index=dist_index)
+
+        print(dist_index)
 
     def index(self):
         '''Generates APT indexes.'''
