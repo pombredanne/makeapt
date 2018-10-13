@@ -16,6 +16,12 @@ class Error(Exception):
 
 
 class Repository(object):
+    _DEFAULT_CONFIG = {
+        'origin': 'Default Origin',
+        'label': 'Default Label',
+        'gpg_key_id': 'none',
+    }
+
     _PACKAGE_FIELD = 'Package'
     _SECTION_FIELD = 'Section'
     _ARCH_FIELD = 'Architecture'
@@ -82,6 +88,7 @@ class Repository(object):
     def __init__(self, path='.'):
         self._apt_path = path
         self._makeapt_path = os.path.join(self._apt_path, '.makeapt')
+        self._config_path = os.path.join(self._makeapt_path, 'config')
         self._index_path = os.path.join(self._makeapt_path, 'index')
         self._cache_path = os.path.join(self._makeapt_path, 'cache')
         self._pool_path = os.path.join(self._apt_path, self.POOL_DIR_NAME)
@@ -89,6 +96,7 @@ class Repository(object):
 
     def __enter__(self):
         # TODO: Lock the repository.
+        self._load_config()
         self._load_index()
         self._load_cache()
         return self
@@ -96,6 +104,7 @@ class Repository(object):
     def __exit__(self, exc_type, exc_value, traceback):
         self._flush_index()
         self._flush_cache()
+        self._flush_config()
         # TODO: Unlock the repository.
 
     def _make_dir(self, path):
@@ -167,6 +176,21 @@ class Repository(object):
         with open(path, 'w') as f:
             for chunk in self._emit_literal(value):
                 f.write(chunk)
+
+    def _load_config(self):
+        default_config_copy = dict(self._DEFAULT_CONFIG)
+        config = self._load_literal(self._config_path, default_config_copy)
+
+        # Make sure all fields are in place.
+        for field, default_value in self._DEFAULT_CONFIG.items():
+            if field not in config:
+                config[field] = default_value
+
+        self._config = config
+
+    def _flush_config(self):
+        self._save_literal(self._config_path, self._config)
+        del self._config
 
     def _load_index(self):
         index = self._load_literal(self._index_path, dict())
@@ -563,8 +587,8 @@ class Repository(object):
             os.remove(path)
 
     def _generate_release_index(self, dist, component, arch):
-        yield 'Origin: Default Origin\n'  # TODO
-        yield 'Label: Default Label\n'  # TODO
+        yield 'Origin: %s\n' % self._config['origin']
+        yield 'Label: %s\n' % self._config['label']
         yield 'Component: %s\n' % component
         yield 'Architecture: %s\n' % arch
         yield 'Acquire-By-Hash: yes\n'  # TODO: Should be configurable.
@@ -630,8 +654,8 @@ class Repository(object):
 
     def _generate_distribution_index(self, dist, components, archs,
                                      dist_index):
-        yield 'Origin: Default Origin\n'  # TODO
-        yield 'Label: Default Label\n'  # TODO
+        yield 'Origin: %s\n' % self._config['origin']
+        yield 'Label: %s\n' % self._config['label']
         yield 'Suite: %s\n' % dist
         yield 'Codename: %s\n' % dist
 
