@@ -20,5 +20,11 @@ makeapt add <group> <paths>...
 For example:
 
 ```
-makeapt add bionic:main ../debs/curl_7.58.0-2ubuntu3.3_amd64.deb
+makeapt add bionic:main packages/*.deb
+```
+
+#### Generate repository indexes
+
+```
+makeapt index
 ```
