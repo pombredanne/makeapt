@@ -36,3 +36,10 @@ makeapt config origin 'My Origin'
 makeapt config label 'My Label'
 makeapt index  # Re-generate indexes.
 ```
+
+#### Signing distribution indexes
+
+```
+makeapt config gpg_key_id 48CA8420
+makeapt index  # Re-generate indexes.
+```
