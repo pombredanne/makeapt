@@ -5,7 +5,7 @@ import setuptools
 
 setuptools.setup(
     name='makeapt',
-    version='1.0a0',
+    version='1.0a1',
     packages=[],
     scripts=['makeapt.py'],
     install_requires=[
