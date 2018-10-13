@@ -18,4 +18,5 @@ rm -rf .makeapt pool dists
 ./makeapt.py rmgroup xenial:main 'c96f389e*'
 ./makeapt.py config origin 'My Origin'
 ./makeapt.py config label 'My Label'
+./makeapt.py config gpg_key_id 48CA8420
 ./makeapt.py index

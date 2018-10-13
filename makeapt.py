@@ -702,10 +702,26 @@ class Repository(object):
                                       dist_index=dist_index)
 
         # Generate distribution index.
-        path = os.path.join(self._dists_path, dist, 'Release')
+        dist_path = os.path.join(self._dists_path, dist)
+        path = os.path.join(dist_path, 'Release')
         index = self._generate_distribution_index(dist, components, dist_archs,
                                                   dist_index)
         self._save_file(path, index)
+
+        # Sign the index.
+        gpg_key_id = self._config['gpg_key_id']
+        if gpg_key_id != 'none':
+            digest_algo = 'SHA256'  # Should be configurable?
+            self._run_shell(['gpg', '--armor', '--detach-sign', '--sign',
+                             '--default-key', gpg_key_id,
+                             '--personal-digest-preferences', digest_algo,
+                             '--output', path + '.gpg', '--yes', path])
+
+            self._run_shell(['gpg', '--armor', '--clearsign', '--sign',
+                             '--default-key', gpg_key_id,
+                             '--personal-digest-preferences', digest_algo,
+                             '--output', os.path.join(dist_path, 'InRelease'),
+                             '--yes', path])
 
     def index(self):
         '''Generates APT indexes.'''
