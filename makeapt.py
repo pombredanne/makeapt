@@ -16,23 +16,20 @@ class Error(Exception):
 
 
 class _Path(object):
-    def __init__(self, comps=[]):
-        assert isinstance(comps, list)
-        self._comps = comps
+    def __init__(self, path=[]):
+        if isinstance(path, _Path):
+            self._comps = path._comps
+        elif isinstance(path, list):
+            self._comps = path
+        else:
+            assert isinstance(path, str), repr(path)
+            self._comps = [path]
 
     def get_as_string(self):
         return os.path.join(*tuple(self._comps))
 
-    def _get_as_comps(self, x):
-        if isinstance(x, _Path):
-            return x._comps
-
-        assert isinstance(x, str)
-        assert '/' not in x  # TODO
-        return [x]
-
     def __add__(self, other):
-        return _Path(self._comps + self._get_as_comps(other))
+        return _Path(self._comps + _Path(other)._comps)
 
     def get_dirname(self):
         return _Path(self._comps[:-1])
@@ -43,6 +40,24 @@ class _Path(object):
     def add_extension(self, ext):
         new_basename = self.get_basename() + ext
         return self.get_dirname() + new_basename
+
+    def __iter__(self):
+        for comp in self._comps:
+            yield comp
+
+
+class _RepositoryIndex(object):
+    _index = dict()
+
+    def add_file_path(self, path):
+        i = self._index
+        for comp in path.get_dirname():
+            i = i.setdefault(comp, dict())
+        i[path.get_basename()] = None
+
+    def get_as_dict(self):
+        index_copy = dict(self._index)
+        return index_copy
 
 
 class Repository(object):
@@ -77,6 +92,9 @@ class Repository(object):
 
     # The name of the directory where we store .deb files.
     POOL_DIR_NAME = 'pool'
+
+    # The directory where we store distribution index files.
+    DISTS_DIR = _Path('dists')
 
     # Canonical makeapt names of hash algorithms. APT
     # repositories use different names for the same hash
@@ -122,7 +140,6 @@ class Repository(object):
         self._index_path = self._makeapt_path + 'index'
         self._cache_path = self._makeapt_path + 'cache'
         self._pool_path = self._apt_path + self.POOL_DIR_NAME
-        self._dists_path = self._apt_path + 'dists'
 
     def __enter__(self):
         # TODO: Lock the repository.
@@ -593,10 +610,16 @@ class Repository(object):
             for chunk in self._generate_package_index((filehash, filename)):
                 yield chunk
 
+    def _save_apt_file(self, path, content, repo_index):
+        full_path = self._apt_path + path
+        self._save_file(full_path, content)
+        repo_index.add_file_path(path)
+        return full_path
+
     def _save_index_file(self, dist, path_in_dist, content, dist_index,
-                         add_to_by_hash_dir=True):
-        path = self._dists_path + dist + path_in_dist
-        self._save_file(path, content)
+                         repo_index, add_to_by_hash_dir=True):
+        path = self._save_apt_file(self.DISTS_DIR + dist + path_in_dist,
+                                   content, repo_index)
 
         # Remember the hashes and the size of the resulting file.
         path_in_dist_string = path_in_dist.get_as_string()
@@ -616,17 +639,17 @@ class Repository(object):
 
         return path
 
-    def _save_index(self, dist, path_in_dist, index, dist_index,
+    def _save_index(self, dist, path_in_dist, index, dist_index, repo_index,
                     create_compressed_versions=True,
                     keep_uncompressed_version=True):
         path = self._save_index_file(
-            dist, path_in_dist, index, dist_index,
+            dist, path_in_dist, index, dist_index, repo_index,
             add_to_by_hash_dir=keep_uncompressed_version)
         if create_compressed_versions:
             self._save_index_file(dist, path_in_dist.add_extension('.gz'),
-                                  self._gzip(path), dist_index)
+                                  self._gzip(path), dist_index, repo_index)
             self._save_index_file(dist, path_in_dist.add_extension('.bz2'),
-                                  self._bzip2(path), dist_index)
+                                  self._bzip2(path), dist_index, repo_index)
 
         # Note that the uncompressed version goes to the
         # distribution index even if it doesn't present in the
@@ -668,7 +691,7 @@ class Repository(object):
             yield '%s %s\n' % (contents_filename, locations)
 
     def _save_contents_index(self, dist, arch, files, path_in_dist,
-                             dist_index):
+                             dist_index, repo_index):
         # Note that according to the Debian specification, we
         # have to add the uncompressed version of the index to
         # the release index regardless of whether we store the
@@ -676,30 +699,32 @@ class Repository(object):
         # before and after decompression.
         contents_index = self._generate_contents_index(files)
         path = path_in_dist + 'Contents-%s' % arch
-        self._save_index(dist, path, contents_index, dist_index,
+        self._save_index(dist, path, contents_index, dist_index, repo_index,
                          keep_uncompressed_version=False)
 
-    def _index_architecture(self, dist, component, arch, files, dist_index):
+    def _index_architecture(self, dist, component, arch, files,
+                            dist_index, repo_index):
         # Generate packages index.
         dir_in_dist = _Path([component, 'binary-%s' % arch])
         self._save_index(dist, dir_in_dist + 'Packages',
-                         self._generate_packages_index(files), dist_index)
+                         self._generate_packages_index(files),
+                         dist_index, repo_index)
 
         # Generate release index.
         release_index = self._generate_release_index(dist, component, arch)
         self._save_index(dist, dir_in_dist + 'Release',
-                         release_index, dist_index,
+                         release_index, dist_index, repo_index,
                          create_compressed_versions=False)
 
         # Generate component contents index.
-        self._save_contents_index(dist, arch, files,
-                                  path_in_dist=_Path([component]),
-                                  dist_index=dist_index)
+        self._save_contents_index(dist, arch, files, _Path([component]),
+                                  dist_index, repo_index)
 
     def _index_distribution_component(self, dist, component, archs,
-                                      dist_index):
+                                      dist_index, repo_index):
         for arch, files in archs.items():
-            self._index_architecture(dist, component, arch, files, dist_index)
+            self._index_architecture(dist, component, arch, files,
+                                     dist_index, repo_index)
 
     def _generate_distribution_index(self, dist, components, archs,
                                      dist_index):
@@ -721,12 +746,12 @@ class Repository(object):
                 hashes, filesize = dist_index[index]
                 yield ' %s %s %s\n' % (hashes[hash_name], filesize, index)
 
-    def _index_distribution(self, dist, components):
+    def _index_distribution(self, dist, components, repo_index):
         # Generate component-specific indexes.
         dist_index = dict()
         for component, archs in components.items():
             self._index_distribution_component(dist, component, archs,
-                                               dist_index)
+                                               dist_index, repo_index)
 
         # Generate distribution contents indexes.
         dist_archs = dict()
@@ -735,40 +760,41 @@ class Repository(object):
                 dist_archs.setdefault(arch, dict()).update(files)
 
         for arch, files in dist_archs.items():
-            self._save_contents_index(dist, arch, files, path_in_dist=_Path(),
-                                      dist_index=dist_index)
+            self._save_contents_index(dist, arch, files, _Path(),
+                                      dist_index, repo_index)
 
         # Generate distribution index.
-        dist_path = self._dists_path + dist
-        path = dist_path + 'Release'
         index = self._generate_distribution_index(dist, components, dist_archs,
                                                   dist_index)
-        self._save_file(path, index)
+        index_path = self.DISTS_DIR + dist + 'Release'
+        full_index_path = self._save_apt_file(index_path, index, repo_index)
 
         # Sign the index.
         gpg_key_id = self._config['gpg_key_id']
         if gpg_key_id != 'none':
             digest_algo = 'SHA256'  # Should be configurable?
+            full_index_gpg_path = full_index_path.add_extension('.gpg')
             self._run_shell(['gpg', '--armor', '--detach-sign', '--sign',
                              '--default-key', gpg_key_id,
                              '--personal-digest-preferences', digest_algo,
-                             '--output',
-                             path.add_extension('.gpg').get_as_string(),
-                             '--yes', path.get_as_string()])
+                             '--output', full_index_gpg_path.get_as_string(),
+                             '--yes', index_path.get_as_string()])
 
+            full_inrelease_path = full_index_path.get_dirname() + 'InRelease'
             self._run_shell(['gpg', '--armor', '--clearsign', '--sign',
                              '--default-key', gpg_key_id,
                              '--personal-digest-preferences', digest_algo,
-                             '--output',
-                             (dist_path + 'InRelease').get_as_string(),
-                             '--yes', path.get_as_string()])
+                             '--output', full_inrelease_path.get_as_string(),
+                             '--yes', index_path.get_as_string()])
 
     def index(self):
         '''Generates APT indexes.'''
         # TODO: Remove the whole 'dists' directory before re-indexing.
+        repo_index = _RepositoryIndex()
         dists = self._get_all_distribution_components()
         for dist, components in dists.items():
-            self._index_distribution(dist, components)
+            self._index_distribution(dist, components, repo_index)
+        # TODO: assert 0, repr(repo_index.get_as_dict())
 
 
 class CommandLineDriver(object):
