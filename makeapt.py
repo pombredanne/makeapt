@@ -15,6 +15,36 @@ class Error(Exception):
     pass
 
 
+class _Path(object):
+    def __init__(self, comps=[]):
+        assert isinstance(comps, list)
+        self._comps = comps
+
+    def get_as_string(self):
+        return os.path.join(*tuple(self._comps))
+
+    def _get_as_comps(self, x):
+        if isinstance(x, _Path):
+            return x._comps
+
+        assert isinstance(x, str)
+        assert '/' not in x  # TODO
+        return [x]
+
+    def __add__(self, other):
+        return _Path(self._comps + self._get_as_comps(other))
+
+    def get_dirname(self):
+        return _Path(self._comps[:-1])
+
+    def get_basename(self):
+        return self._comps[-1]
+
+    def add_extension(self, ext):
+        new_basename = self.get_basename() + ext
+        return self.get_dirname() + new_basename
+
+
 class Repository(object):
     _DEFAULT_CONFIG = {
         'origin': 'Default Origin',
@@ -86,13 +116,13 @@ class Repository(object):
     _BUFF_SIZE = 4096
 
     def __init__(self, path='.'):
-        self._apt_path = path
-        self._makeapt_path = os.path.join(self._apt_path, '.makeapt')
-        self._config_path = os.path.join(self._makeapt_path, 'config')
-        self._index_path = os.path.join(self._makeapt_path, 'index')
-        self._cache_path = os.path.join(self._makeapt_path, 'cache')
-        self._pool_path = os.path.join(self._apt_path, self.POOL_DIR_NAME)
-        self._dists_path = os.path.join(self._apt_path, 'dists')
+        self._apt_path = _Path([path])
+        self._makeapt_path = self._apt_path + '.makeapt'
+        self._config_path = self._makeapt_path + 'config'
+        self._index_path = self._makeapt_path + 'index'
+        self._cache_path = self._makeapt_path + 'cache'
+        self._pool_path = self._apt_path + self.POOL_DIR_NAME
+        self._dists_path = self._apt_path + 'dists'
 
     def __enter__(self):
         # TODO: Lock the repository.
@@ -120,15 +150,16 @@ class Repository(object):
         self._config[field] = value
 
     def _make_dir(self, path):
-        if not os.path.exists(path):
-            os.makedirs(path)
+        path_string = path.get_as_string()
+        if not os.path.exists(path_string):
+            os.makedirs(path_string)
 
     def _make_file_dir(self, path):
-        self._make_dir(os.path.dirname(path))
+        self._make_dir(path.get_dirname())
 
     def _save_file(self, path, content):
         self._make_file_dir(path)
-        with open(path, 'wb') as f:
+        with open(path.get_as_string(), 'wb') as f:
             for chunk in content:
                 if isinstance(chunk, str):
                     chunk = chunk.encode('ascii')
@@ -138,13 +169,13 @@ class Repository(object):
         # TODO: Can _run_shell() return a generator?
         # TODO: Should we do that with a Python library?
         yield self._run_shell(['gzip', '--keep', '--best', '--no-name',
-                               '--stdout', path])
+                               '--stdout', path.get_as_string()])
 
     def _bzip2(self, path):
         # TODO: Can _run_shell() return a generator?
         # TODO: Should we do that with a Python library?
         yield self._run_shell(['bzip2', '--keep', '--best',
-                               '--stdout', path])
+                               '--stdout', path.get_as_string()])
 
     def init(self):
         '''Initializes APT repository.'''
@@ -153,7 +184,7 @@ class Repository(object):
 
     def _load_literal(self, path, default):
         try:
-            with open(path, 'r') as f:
+            with open(path.get_as_string(), 'r') as f:
                 return ast.literal_eval(f.read())
         except FileNotFoundError:
             return default
@@ -185,7 +216,7 @@ class Repository(object):
         yield '\n'
 
     def _save_literal(self, path, value):
-        with open(path, 'w') as f:
+        with open(path.get_as_string(), 'w') as f:
             for chunk in self._emit_literal(value):
                 f.write(chunk)
 
@@ -241,7 +272,7 @@ class Repository(object):
                     for name in hash_names}
 
         # Read out the file by chunks and update messages.
-        with open(path, 'rb') as f:
+        with open(path.get_as_string(), 'rb') as f:
             for chunk in iter(lambda: f.read(self._BUFF_SIZE), b''):
                 for hash_name, msg in msgs.items():
                     msg.update(chunk)
@@ -250,8 +281,10 @@ class Repository(object):
 
     def _copy_file(self, src, dest, overwrite=True):
         self._make_file_dir(dest)
-        if overwrite or not os.path.exists(dest):
-            shutil.copyfile(src, dest)
+
+        dest_string = dest.get_as_string()
+        if overwrite or not os.path.exists(dest_string):
+            shutil.copyfile(src.get_as_string(), dest_string)
 
     def _link_or_copy_file(self, src, dest):
         # TODO: Use links by default and fallback to copies on an option.
@@ -259,18 +292,18 @@ class Repository(object):
 
     def _get_path_in_pool(self, file):
         filehash, filename = file
-        return os.path.join(filehash[:2], filehash[2:], filename)
+        return _Path([filehash[:2], filehash[2:], filename])
 
     def _get_full_package_path(self, file):
-        return os.path.join(self._pool_path, self._get_path_in_pool(file))
+        return self._pool_path + self._get_path_in_pool(file)
 
     def _add_package_to_pool(self, path):
-        filehash = self._hash_file(path, self._KEY_HASH_NAME)
+        filehash = self._hash_file(_Path([path]), self._KEY_HASH_NAME)
         filename = os.path.basename(path)
         file = filehash, filename
         path_in_pool = self._get_path_in_pool(file)
-        dest_path = os.path.join(self._pool_path, path_in_pool)
-        self._copy_file(path, dest_path, overwrite=False)
+        dest_path = self._pool_path + path_in_pool
+        self._copy_file(_Path([path]), dest_path, overwrite=False)
         return file
 
     def _add_packages_to_pool(self, paths):
@@ -410,7 +443,8 @@ class Repository(object):
         # Run 'dpkg-deb' to list the control package fields.
         # TODO: We can run several processes simultaneously.
         path = self._get_full_package_path(file)
-        output = self._run_shell(['dpkg-deb', '--field', path] +
+        output = self._run_shell(['dpkg-deb',
+                                  '--field', path.get_as_string()] +
                                   self._DEB_INFO_FIELDS)
         output = output.decode('utf-8')
 
@@ -448,7 +482,7 @@ class Repository(object):
 
     def _get_deb_contents(self, file):
         path = self._get_full_package_path(file)
-        out = self._run_shell(['dpkg-deb', '--contents', path])
+        out = self._run_shell(['dpkg-deb', '--contents', path.get_as_string()])
         out = out.decode('utf-8').split('\n')
 
         # Remove empty lines.
@@ -482,7 +516,7 @@ class Repository(object):
         info[self._CONTENTS_FIELD] = self._get_deb_contents(file)
 
         path = self._get_full_package_path(file)
-        info[self._FILESIZE_FIELD] = os.path.getsize(path)
+        info[self._FILESIZE_FIELD] = os.path.getsize(path.get_as_string())
 
         hashes = self._hash_file(path, {'md5', 'sha1', 'sha256', 'sha512'})
         for hash_name, hash in hashes.items():
@@ -543,8 +577,9 @@ class Repository(object):
                 yield '%s: %s\n' % (field, info[field])
 
         # Emit additional fields.
-        yield 'Filename: %s\n' % os.path.join(self.POOL_DIR_NAME,
-                                              self._get_path_in_pool(file))
+        filename_field = (_Path([self.POOL_DIR_NAME]) +
+                              self._get_path_in_pool(file)).get_as_string()
+        yield 'Filename: %s\n' % filename_field
 
         yield 'Size: %u\n' % info[self._FILESIZE_FIELD]
 
@@ -560,22 +595,23 @@ class Repository(object):
 
     def _save_index_file(self, dist, path_in_dist, content, dist_index,
                          add_to_by_hash_dir=True):
-        path = os.path.join(self._dists_path, dist, path_in_dist)
+        path = self._dists_path + dist + path_in_dist
         self._save_file(path, content)
 
         # Remember the hashes and the size of the resulting file.
-        assert path_in_dist not in dist_index
+        path_in_dist_string = path_in_dist.get_as_string()
+        assert path_in_dist_string not in dist_index
         hashes = self._hash_file(path, self._DISTRIBUTION_INDEX_HASH_NAMES)
-        filesize = os.path.getsize(path)
-        dist_index[path_in_dist] = hashes, filesize
+        filesize = os.path.getsize(path.get_as_string())
+        dist_index[path_in_dist_string] = hashes, filesize
 
         # Create by-hash copies.
         if add_to_by_hash_dir:
             hash_names = ['MD5Sum',  # Note the uppercase 'S'.
                           'SHA256']
             for hash_name, hash in self._hash_file(path, hash_names).items():
-                dir = os.path.dirname(path)
-                dest_path = os.path.join(dir, 'by-hash', hash_name, hash)
+                dir = path.get_dirname()
+                dest_path = dir + 'by-hash' + hash_name + hash
                 self._link_or_copy_file(path, dest_path)
 
         return path
@@ -587,16 +623,16 @@ class Repository(object):
             dist, path_in_dist, index, dist_index,
             add_to_by_hash_dir=keep_uncompressed_version)
         if create_compressed_versions:
-            self._save_index_file(dist, path_in_dist + '.gz',
+            self._save_index_file(dist, path_in_dist.add_extension('.gz'),
                                   self._gzip(path), dist_index)
-            self._save_index_file(dist, path_in_dist + '.bz2',
+            self._save_index_file(dist, path_in_dist.add_extension('.bz2'),
                                   self._bzip2(path), dist_index)
 
         # Note that the uncompressed version goes to the
         # distribution index even if it doesn't present in the
         # repository.
         if not keep_uncompressed_version:
-            os.remove(path)
+            os.remove(path.get_as_string())
 
     def _generate_release_index(self, dist, component, arch):
         yield 'Origin: %s\n' % self._config['origin']
@@ -639,24 +675,25 @@ class Repository(object):
         # first. This way apt clients can check indexes both
         # before and after decompression.
         contents_index = self._generate_contents_index(files)
-        path = os.path.join(path_in_dist, 'Contents-%s' % arch)
+        path = path_in_dist + 'Contents-%s' % arch
         self._save_index(dist, path, contents_index, dist_index,
                          keep_uncompressed_version=False)
 
     def _index_architecture(self, dist, component, arch, files, dist_index):
         # Generate packages index.
-        dir_in_dist = os.path.join(component, 'binary-%s' % arch)
-        self._save_index(dist, os.path.join(dir_in_dist, 'Packages'),
+        dir_in_dist = _Path([component, 'binary-%s' % arch])
+        self._save_index(dist, dir_in_dist + 'Packages',
                          self._generate_packages_index(files), dist_index)
 
         # Generate release index.
         release_index = self._generate_release_index(dist, component, arch)
-        self._save_index(dist, os.path.join(dir_in_dist, 'Release'),
+        self._save_index(dist, dir_in_dist + 'Release',
                          release_index, dist_index,
                          create_compressed_versions=False)
 
         # Generate component contents index.
-        self._save_contents_index(dist, arch, files, path_in_dist=component,
+        self._save_contents_index(dist, arch, files,
+                                  path_in_dist=_Path([component]),
                                   dist_index=dist_index)
 
     def _index_distribution_component(self, dist, component, archs,
@@ -698,12 +735,12 @@ class Repository(object):
                 dist_archs.setdefault(arch, dict()).update(files)
 
         for arch, files in dist_archs.items():
-            self._save_contents_index(dist, arch, files, path_in_dist='',
+            self._save_contents_index(dist, arch, files, path_in_dist=_Path(),
                                       dist_index=dist_index)
 
         # Generate distribution index.
-        dist_path = os.path.join(self._dists_path, dist)
-        path = os.path.join(dist_path, 'Release')
+        dist_path = self._dists_path + dist
+        path = dist_path + 'Release'
         index = self._generate_distribution_index(dist, components, dist_archs,
                                                   dist_index)
         self._save_file(path, index)
@@ -715,13 +752,16 @@ class Repository(object):
             self._run_shell(['gpg', '--armor', '--detach-sign', '--sign',
                              '--default-key', gpg_key_id,
                              '--personal-digest-preferences', digest_algo,
-                             '--output', path + '.gpg', '--yes', path])
+                             '--output',
+                             path.add_extension('.gpg').get_as_string(),
+                             '--yes', path.get_as_string()])
 
             self._run_shell(['gpg', '--armor', '--clearsign', '--sign',
                              '--default-key', gpg_key_id,
                              '--personal-digest-preferences', digest_algo,
-                             '--output', os.path.join(dist_path, 'InRelease'),
-                             '--yes', path])
+                             '--output',
+                             (dist_path + 'InRelease').get_as_string(),
+                             '--yes', path.get_as_string()])
 
     def index(self):
         '''Generates APT indexes.'''
