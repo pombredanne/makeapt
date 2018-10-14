@@ -60,6 +60,131 @@ class _RepositoryIndex(object):
         return index_copy
 
 
+class _ComponentArch(object):
+    def __init__(self, arch_id, component):
+        self._id = arch_id
+        self._component = component
+
+    def get_id(self):
+        return self._id
+
+    def get_component(self):
+        return self._component
+
+    def get_component_id(self):
+        return self._component.get_id()
+
+    def get_distribution(self):
+        return self._component.get_distribution()
+
+    def get_packages(self):
+        return self._component.get_packages_in_arch(self)
+
+
+class _Component(object):
+    def __init__(self, component_id, dist):
+        self._id = component_id
+        self._dist = dist
+
+    def get_id(self):
+        return self._id
+
+    def get_distribution(self):
+        return self._dist
+
+    def get_archs(self):
+        return self._dist.get_archs_in_component(self)
+
+    def get_packages_in_arch(self, arch):
+        assert isinstance(arch, _ComponentArch)
+        assert arch.get_component() is self
+        return self._dist.get_packages_in_component_arch(arch)
+
+
+class _DistributionArch(object):
+    def __init__(self, arch_id, dist):
+        self._id = arch_id
+        self._dist = dist
+
+    def get_id(self):
+        return self._id
+
+    def get_distribution(self):
+        return self._dist
+
+    def get_packages(self):
+        return self._dist.get_packages_in_arch(self)
+
+
+class _Distribution(object):
+    def __init__(self, dist_id):
+        self._id = dist_id
+        self._packages = dict()
+
+    def get_id(self):
+        return self._id
+
+    def add_package(self, component_id, arch_id, file):
+        key = component_id, arch_id
+        filenames = self._packages.setdefault(key, dict())
+        filehash, filename = file
+        if filename in filenames:
+            full_component_id = '%s:%s' % (self._dist_id, component_id)
+            raise Error('More than one package %r in component %r, '
+                        'architecture %r.' % (filename, full_component_id,
+                                              arch_id))
+
+        filenames[filename] = filehash
+
+    # Returns components of this distribution.
+    def get_components(self):
+        ids = {component_id for component_id, arch_id in self._packages}
+        for id in ids:
+            yield _Component(id, self)
+
+    # Returns architectures of this distribution's component.
+    def get_archs_in_component(self, component):
+        assert component.get_distribution() is self
+        component_id = component.get_id()
+        ids = {arch_id for comp_id, arch_id in self._packages
+                   if comp_id == component_id}
+        for id in ids:
+            yield _ComponentArch(id, component)
+
+    # Returns architectures of all components in this distribution.
+    def get_archs_in_all_components(self):
+        for component in self.get_components():
+            for arch in component.get_archs():
+                yield arch
+
+    # Returns architectures of this distribution.
+    def get_archs(self):
+        ids = {arch_id for component_id, arch_id in self._packages}
+        for id in ids:
+            yield _DistributionArch(id, self)
+
+    # Returns packages for specific component architecture in
+    # this distribution.
+    def get_packages_in_component_arch(self, arch):
+        assert isinstance(arch, _ComponentArch)
+        assert arch.get_distribution() is self
+        target_key = arch.get_component_id(), arch.get_id()
+        for key, filenames in self._packages.items():
+            if key == target_key:
+                for filename, filehash in filenames.items():
+                    yield (filehash, filename)
+
+    # Returns packages for a specific architecture in this distribution.
+    def get_packages_in_arch(self, arch):
+        assert isinstance(arch, _DistributionArch)
+        assert arch.get_distribution() is self
+        target_arch_id = arch.get_id()
+        for (component_id, arch_id), filenames in self._packages.items():
+            if arch_id == target_arch_id:
+                for filename, filehash in filenames.items():
+                    yield (filehash, filename)
+
+
 class Repository(object):
     _DEFAULT_CONFIG = {
         'origin': 'Default Origin',
@@ -559,30 +684,30 @@ class Repository(object):
         return package_info[field]
 
     def _parse_distribution_component_group(self, group):
-        parts = group.split(':')
-        return tuple(parts) if len(parts) == 2 else None
+        ids = group.split(':')
+        return tuple(ids) if len(ids) == 2 else None
 
-    def _get_all_distribution_components(self):
+    def _get_distributions(self):
         dists = dict()
-        for (filehash, filename), groups in self._get_all_packages():
+        for file, groups in self._get_all_packages():
             for group in groups:
-                parts = self._parse_distribution_component_group(group)
-                if not parts:
+                ids = self._parse_distribution_component_group(group)
+                if not ids:
                     continue
 
-                dist, component = parts
-                components = dists.setdefault(dist, dict())
-                archs = components.setdefault(component, dict())
-                arch = self._get_package_arch(filehash)
-                filenames = archs.setdefault(arch, dict())
-                if filename in filenames:
-                    raise Error('More than one package %r in component %r, '
-                                'architecture %r.' % (
-                                    filename, '%s:%s' % parts, arch))
+                dist_id, component_id = ids
+                if dist_id in dists:
+                    dist = dists[dist_id]
+                else:
+                    dist = _Distribution(dist_id)
+                    dists[dist_id] = dist
 
-                filenames[filename] = filehash
+                filehash, filename = file
+                arch_id = self._get_package_arch(filehash)
+                dist.add_package(component_id, arch_id, file)
 
-        return dists
+        for dist_id, dist in dists.items():
+            yield dist
 
     def _generate_package_index(self, file):
         # Emit the control fields from the deb file itself. Note that we want
@@ -606,8 +731,8 @@ class Repository(object):
             yield '%s: %s\n' % (algo, self._get_package_hash(filehash, algo))
 
     def _generate_packages_index(self, files):
-        for filename, filehash in files.items():
-            for chunk in self._generate_package_index((filehash, filename)):
+        for file in files:
+            for chunk in self._generate_package_index(file):
                 yield chunk
 
     def _save_apt_file(self, path, content, repo_index):
@@ -618,8 +743,9 @@ class Repository(object):
 
     def _save_index_file(self, dist, path_in_dist, content, dist_index,
                          repo_index, add_to_by_hash_dir=True):
-        path = self._save_apt_file(self.DISTS_DIR + dist + path_in_dist,
-                                   content, repo_index)
+        path = self._save_apt_file(
+            self.DISTS_DIR + dist.get_id() + path_in_dist,
+            content, repo_index)
 
         # Remember the hashes and the size of the resulting file.
         path_in_dist_string = path_in_dist.get_as_string()
@@ -657,16 +783,16 @@ class Repository(object):
         if not keep_uncompressed_version:
             os.remove(path.get_as_string())
 
-    def _generate_release_index(self, dist, component, arch):
+    def _generate_release_index(self, arch):
         yield 'Origin: %s\n' % self._config['origin']
         yield 'Label: %s\n' % self._config['label']
-        yield 'Component: %s\n' % component
-        yield 'Architecture: %s\n' % arch
+        yield 'Component: %s\n' % arch.get_component().get_id()
+        yield 'Architecture: %s\n' % arch.get_id()
         yield 'Acquire-By-Hash: yes\n'  # TODO: Should be configurable.
 
     def _generate_contents_index(self, files):
         index = dict()
-        for filename, filehash in files.items():
+        for filehash, filename in files:
             package_info = self._get_package_info(filehash)
             location = '%s/%s' % (package_info[self._SECTION_FIELD],
                                   package_info[self._PACKAGE_FIELD])
@@ -690,54 +816,58 @@ class Repository(object):
             locations = ','.join(sorted(index[contents_filename]))
             yield '%s %s\n' % (contents_filename, locations)
 
-    def _save_contents_index(self, dist, arch, files, path_in_dist,
+    def _save_contents_index(self, arch, path_in_dist,
                              dist_index, repo_index):
         # Note that according to the Debian specification, we
         # have to add the uncompressed version of the index to
         # the release index regardless of whether we store the
         # first. This way apt clients can check indexes both
         # before and after decompression.
-        contents_index = self._generate_contents_index(files)
-        path = path_in_dist + 'Contents-%s' % arch
-        self._save_index(dist, path, contents_index, dist_index, repo_index,
+        contents_index = self._generate_contents_index(arch.get_packages())
+        path = path_in_dist + 'Contents-%s' % arch.get_id()
+        self._save_index(arch.get_distribution(), path, contents_index,
+                         dist_index, repo_index,
                          keep_uncompressed_version=False)
 
-    def _index_architecture(self, dist, component, arch, files,
-                            dist_index, repo_index):
+    def _index_architecture(self, arch, dist_index, repo_index):
         # Generate packages index.
-        dir_in_dist = _Path([component, 'binary-%s' % arch])
+        dir_in_dist = _Path([arch.get_component().get_id(),
+                             'binary-%s' % arch.get_id()])
+        dist = arch.get_distribution()
         self._save_index(dist, dir_in_dist + 'Packages',
-                         self._generate_packages_index(files),
+                         self._generate_packages_index(arch.get_packages()),
                          dist_index, repo_index)
 
         # Generate release index.
-        release_index = self._generate_release_index(dist, component, arch)
+        release_index = self._generate_release_index(arch)
         self._save_index(dist, dir_in_dist + 'Release',
                          release_index, dist_index, repo_index,
                          create_compressed_versions=False)
 
         # Generate component contents index.
-        self._save_contents_index(dist, arch, files, _Path([component]),
+        self._save_contents_index(arch, _Path([arch.get_component().get_id()]),
                                   dist_index, repo_index)
 
-    def _index_distribution_component(self, dist, component, archs,
-                                      dist_index, repo_index):
-        for arch, files in archs.items():
-            self._index_architecture(dist, component, arch, files,
-                                     dist_index, repo_index)
+    def _index_distribution_component(self, component, dist_index, repo_index):
+        for arch in component.get_archs():
+            self._index_architecture(arch, dist_index, repo_index)
 
-    def _generate_distribution_index(self, dist, components, archs,
-                                     dist_index):
+    def _generate_distribution_index(self, dist, dist_index):
         yield 'Origin: %s\n' % self._config['origin']
         yield 'Label: %s\n' % self._config['label']
-        yield 'Suite: %s\n' % dist
-        yield 'Codename: %s\n' % dist
+        yield 'Suite: %s\n' % dist.get_id()
+        yield 'Codename: %s\n' % dist.get_id()
 
         now = datetime.datetime.utcnow()
         yield 'Date: %s\n' % now.strftime('%a, %d %b %Y %H:%M:%S +0000')
 
+        components = (component.get_id()
+                          for component in dist.get_components())
         yield 'Components: %s\n' % ' '.join(sorted(components))
+
+        archs = (arch.get_id() for arch in dist.get_archs())
         yield 'Architectures: %s\n' % ' '.join(sorted(archs))
+
         yield 'Acquire-By-Hash: yes\n'
 
         for hash_name in self._DISTRIBUTION_INDEX_HASH_NAMES:
@@ -746,27 +876,20 @@ class Repository(object):
                 hashes, filesize = dist_index[index]
                 yield ' %s %s %s\n' % (hashes[hash_name], filesize, index)
 
-    def _index_distribution(self, dist, components, repo_index):
+    def _index_distribution(self, dist, repo_index):
         # Generate component-specific indexes.
         dist_index = dict()
-        for component, archs in components.items():
-            self._index_distribution_component(dist, component, archs,
-                                               dist_index, repo_index)
+        for component in dist.get_components():
+            self._index_distribution_component(component, dist_index,
+                                               repo_index)
 
         # Generate distribution contents indexes.
-        dist_archs = dict()
-        for component, archs in components.items():
-            for arch, files in archs.items():
-                dist_archs.setdefault(arch, dict()).update(files)
-
-        for arch, files in dist_archs.items():
-            self._save_contents_index(dist, arch, files, _Path(),
-                                      dist_index, repo_index)
+        for arch in dist.get_archs():
+            self._save_contents_index(arch, _Path(), dist_index, repo_index)
 
         # Generate distribution index.
-        index = self._generate_distribution_index(dist, components, dist_archs,
-                                                  dist_index)
-        index_path = self.DISTS_DIR + dist + 'Release'
+        index = self._generate_distribution_index(dist, dist_index)
+        index_path = self.DISTS_DIR + dist.get_id() + 'Release'
         full_index_path = self._save_apt_file(index_path, index, repo_index)
 
         # Sign the index.
@@ -791,9 +914,8 @@ class Repository(object):
         '''Generates APT indexes.'''
         # TODO: Remove the whole 'dists' directory before re-indexing.
         repo_index = _RepositoryIndex()
-        dists = self._get_all_distribution_components()
-        for dist, components in dists.items():
-            self._index_distribution(dist, components, repo_index)
+        for dist in self._get_distributions():
+            self._index_distribution(dist, repo_index)
         # TODO: assert 0, repr(repo_index.get_as_dict())
 
 
