@@ -67,7 +67,7 @@ class _RepositoryIndex(object):
             i = i.setdefault(comp, dict())
         i[path.get_basename()] = None
 
-    def get_as_dict(self):
+    def get(self):
         index_copy = dict(self._index)
         return index_copy
 
@@ -782,17 +782,19 @@ class Repository(object):
             for chunk in self._generate_package_index(package):
                 yield chunk
 
-    def _save_apt_file(self, path, content, repo_index):
+    def _save_apt_file(self, path, content, repo_index, is_temporary=False):
         full_path = self._apt_path + path
         self._save_file(full_path, content)
-        repo_index.add_file_path(path)
+        if not is_temporary:
+            repo_index.add_file_path(path)
         return full_path
 
     def _save_index_file(self, dist, path_in_dist, content,
-                         add_to_by_hash_dir=True):
+                         is_temporary=False):
         path = self._save_apt_file(
             self.DISTS_DIR + dist.get_id() + path_in_dist,
-            content, dist.get_repository_index())
+            content, dist.get_repository_index(),
+            is_temporary=is_temporary)
 
         # Remember the hashes and the size of the resulting file.
         path_in_dist_string = path_in_dist.get_as_string()
@@ -801,7 +803,7 @@ class Repository(object):
         dist.get_index().add(path_in_dist_string, hashes, filesize)
 
         # Create by-hash copies.
-        if add_to_by_hash_dir:
+        if not is_temporary:
             hash_names = ['MD5Sum',  # Note the uppercase 'S'.
                           'SHA256']
             for hash_name, hash in self._hash_file(path, hash_names).items():
@@ -816,7 +818,7 @@ class Repository(object):
                     keep_uncompressed_version=True):
         path = self._save_index_file(
             dist, path_in_dist, index,
-            add_to_by_hash_dir=keep_uncompressed_version)
+            is_temporary=not keep_uncompressed_version)
         if create_compressed_versions:
             self._save_index_file(dist, path_in_dist.add_extension('.gz'),
                                   self._gzip(path))
@@ -957,7 +959,10 @@ class Repository(object):
         repo_index = _RepositoryIndex()
         for dist in self._get_distributions(repo_index):
             self._index_distribution(dist)
-        # TODO: assert 0, repr(repo_index.get_as_dict())
+
+        if False:  # TODO
+            import pprint
+            pprint.pprint(repo_index.get())
 
 
 class CommandLineDriver(object):
