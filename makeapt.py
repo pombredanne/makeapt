@@ -953,10 +953,9 @@ class Repository(object):
                              '--output', full_inrelease_path.get_as_string(),
                              '--yes', index_path.get_as_string()])
 
-    def index(self):
+    def index(self, repo_index=_RepositoryIndex()):
         '''Generates APT indexes.'''
         # TODO: Remove the whole 'dists' directory before re-indexing.
-        repo_index = _RepositoryIndex()
         for dist in self._get_distributions(repo_index):
             self._index_distribution(dist)
 
