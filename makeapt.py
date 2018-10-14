@@ -46,6 +46,18 @@ class _Path(object):
             yield comp
 
 
+class _Package(object):
+    def __init__(self, filehash, filename):
+        self._filehash = filehash
+        self._filename = filename
+
+    def get_filehash(self):
+        return self._filehash
+
+    def get_filename(self):
+        return self._filename
+
+
 class _RepositoryIndex(object):
     _index = dict()
 
@@ -124,17 +136,17 @@ class _Distribution(object):
     def get_id(self):
         return self._id
 
-    def add_package(self, component_id, arch_id, file):
+    def add_package(self, component_id, arch_id, package):
         key = component_id, arch_id
         filenames = self._packages.setdefault(key, dict())
-        filehash, filename = file
+        filename = package.get_filename()
         if filename in filenames:
             full_component_id = '%s:%s' % (self._dist_id, component_id)
             raise Error('More than one package %r in component %r, '
                         'architecture %r.' % (filename, full_component_id,
                                               arch_id))
 
-        filenames[filename] = filehash
+        filenames[filename] = package.get_filehash()
 
     # Returns components of this distribution.
     def get_components(self):
@@ -172,7 +184,7 @@ class _Distribution(object):
         for key, filenames in self._packages.items():
             if key == target_key:
                 for filename, filehash in filenames.items():
-                    yield (filehash, filename)
+                    yield _Package(filehash, filename)
 
     # Returns packages for a specific architecture in this distribution.
     def get_packages_in_arch(self, arch):
@@ -182,7 +194,7 @@ class _Distribution(object):
         for (component_id, arch_id), filenames in self._packages.items():
             if arch_id == target_arch_id:
                 for filename, filehash in filenames.items():
-                    yield (filehash, filename)
+                    yield _Package(filehash, filename)
 
 
 class Repository(object):
@@ -323,6 +335,7 @@ class Repository(object):
         '''Initializes APT repository.'''
         self._make_dir(self._makeapt_path)
         self._make_dir(self._pool_path)
+        # TODO: Should we make the 'dists' directory?
 
     def _load_literal(self, path, default):
         try:
@@ -432,8 +445,9 @@ class Repository(object):
         # TODO: Use links by default and fallback to copies on an option.
         self._copy_file(src, dest)
 
-    def _get_path_in_pool(self, file):
-        filehash, filename = file
+    def _get_path_in_pool(self, package):
+        filehash = package.get_filehash()
+        filename = package.get_filename()
         return _Path([filehash[:2], filehash[2:], filename])
 
     def _get_full_package_path(self, file):
@@ -442,29 +456,29 @@ class Repository(object):
     def _add_package_to_pool(self, path):
         filehash = self._hash_file(_Path([path]), self._KEY_HASH_NAME)
         filename = os.path.basename(path)
-        file = filehash, filename
-        path_in_pool = self._get_path_in_pool(file)
+        package = _Package(filehash, filename)
+        path_in_pool = self._get_path_in_pool(package)
         dest_path = self._pool_path + path_in_pool
         self._copy_file(_Path([path]), dest_path, overwrite=False)
-        return file
+        return package
 
     def _add_packages_to_pool(self, paths):
         unique_paths = set(paths)
         return {self._add_package_to_pool(path) for path in unique_paths}
 
-    def _add_package_to_index(self, filehash, filename):
-        filenames = self._index.setdefault(filehash, dict())
-        filenames.setdefault(filename, set())
+    def _add_package_to_index(self, package):
+        filenames = self._index.setdefault(package.get_filehash(), dict())
+        filenames.setdefault(package.get_filename(), set())
 
-    def _add_packages_to_index(self, files):
-        for filehash, filename in files:
-            self._add_package_to_index(filehash, filename)
+    def _add_packages_to_index(self, packages):
+        for package in packages:
+            self._add_package_to_index(package)
 
     def add(self, paths):
         '''Adds packages to repository.'''
-        files = self._add_packages_to_pool(paths)
-        self._add_packages_to_index(files)
-        return files
+        packages = self._add_packages_to_pool(paths)
+        self._add_packages_to_index(packages)
+        return packages
 
     def _get_empty_generator(self):
         return (x for x in [])
@@ -480,7 +494,7 @@ class Repository(object):
     def _get_all_packages(self):
         for filehash, filenames in self._index.items():
             for filename, groups in filenames.items():
-                yield ((filehash, filename), groups)
+                yield _Package(filehash, filename), groups
 
     def _get_all_package_files(self):
         for file, groups in self._get_all_packages():
@@ -488,7 +502,7 @@ class Repository(object):
 
     def _get_package_files_by_hash(self, filehash):
         for filename in self._index[filehash]:
-            yield (filehash, filename)
+            yield _Package(filehash, filename)
 
     def _get_any_package_file_by_hash(self, filehash):
         for file in self._get_package_files_by_hash(filehash):
@@ -503,10 +517,15 @@ class Repository(object):
     def _match_group(self, group, pattern):
         return fnmatch.fnmatch(group, pattern)
 
-    def _match_groups(self, file, pattern, invert=False):
+    def _get_package_groups(self, package):
+        filehash = package.get_filehash()
+        filename = package.get_filename()
+        return self._index[filehash][filename]
+
+    def _match_groups(self, package, pattern, invert=False):
         # Consider name and hash of the file to be its implicit groups.
-        filehash, filename = file
-        groups = self._index[filehash][filename] | set(file)
+        groups = (self._get_package_groups(package) |
+                      {package.get_filehash(), package.get_filename()})
 
         matches = any(self._match_group(group, pattern) for group in groups)
         if invert:
@@ -543,9 +562,9 @@ class Repository(object):
 
         return packages
 
-    def add_to_group(self, group, files):
-        for filehash, filename in files:
-            self._index[filehash][filename].add(group)
+    def add_to_group(self, group, packages):
+        for package in packages:
+            self._get_package_groups(package).add(group)
 
     def group(self, group, package_specs):
         '''Makes packages part of a group.'''
@@ -554,8 +573,8 @@ class Repository(object):
 
     def rmgroup(self, group, package_specs):
         '''Excludes packages from a group.'''
-        for filehash, filename in self._get_packages_by_specs(package_specs):
-            self._index[filehash][filename].discard(group)
+        for package in self._get_packages_by_specs(package_specs):
+            self._get_package_groups(package).discard(group)
 
     def ls(self, package_specs):
         '''Lists packages.'''
@@ -581,10 +600,10 @@ class Repository(object):
         return (self._MAKEAPT_FIELD_PREFIX +
                     self._CANONICAL_HASH_NAMES[hash_name])
 
-    def _get_deb_control_info(self, file):
+    def _get_deb_control_info(self, package):
         # Run 'dpkg-deb' to list the control package fields.
         # TODO: We can run several processes simultaneously.
-        path = self._get_full_package_path(file)
+        path = self._get_full_package_path(package)
         output = self._run_shell(['dpkg-deb',
                                   '--field', path.get_as_string()] +
                                   self._DEB_INFO_FIELDS)
@@ -596,7 +615,7 @@ class Repository(object):
         output = output.split('\n')
         output = [x.replace(mark, '\n') for x in output if x != '']
 
-        filehash, filename = file
+        filename = package.get_filename()
         info = dict()
         for line in output:
             parts = line.split(':', maxsplit=1)
@@ -689,7 +708,7 @@ class Repository(object):
 
     def _get_distributions(self):
         dists = dict()
-        for file, groups in self._get_all_packages():
+        for package, groups in self._get_all_packages():
             for group in groups:
                 ids = self._parse_distribution_component_group(group)
                 if not ids:
@@ -702,25 +721,23 @@ class Repository(object):
                     dist = _Distribution(dist_id)
                     dists[dist_id] = dist
 
-                filehash, filename = file
-                arch_id = self._get_package_arch(filehash)
-                dist.add_package(component_id, arch_id, file)
+                arch_id = self._get_package_arch(package.get_filehash())
+                dist.add_package(component_id, arch_id, package)
 
         for dist_id, dist in dists.items():
             yield dist
 
-    def _generate_package_index(self, file):
+    def _generate_package_index(self, package):
         # Emit the control fields from the deb file itself. Note that we want
         # them in this exactly order they come in the list.
-        filehash, filename = file
-        info = self._get_package_info(filehash)
+        info = self._get_package_info(package.get_filehash())
         for field in self._DEB_INFO_FIELDS:
             if field in info:
                 yield '%s: %s\n' % (field, info[field])
 
         # Emit additional fields.
         filename_field = (_Path([self.POOL_DIR_NAME]) +
-                              self._get_path_in_pool(file)).get_as_string()
+                              self._get_path_in_pool(package)).get_as_string()
         yield 'Filename: %s\n' % filename_field
 
         yield 'Size: %u\n' % info[self._FILESIZE_FIELD]
@@ -728,11 +745,12 @@ class Repository(object):
         hash_algos = ['MD5sum',  # Note the lowercase 's' in 'MD5sum'.
                       'SHA1', 'SHA256', 'SHA512']
         for algo in hash_algos:
-            yield '%s: %s\n' % (algo, self._get_package_hash(filehash, algo))
+            hash = self._get_package_hash(package.get_filehash(), algo)
+            yield '%s: %s\n' % (algo, hash)
 
-    def _generate_packages_index(self, files):
-        for file in files:
-            for chunk in self._generate_package_index(file):
+    def _generate_packages_index(self, packages):
+        for package in packages:
+            for chunk in self._generate_package_index(package):
                 yield chunk
 
     def _save_apt_file(self, path, content, repo_index):
@@ -790,10 +808,10 @@ class Repository(object):
         yield 'Architecture: %s\n' % arch.get_id()
         yield 'Acquire-By-Hash: yes\n'  # TODO: Should be configurable.
 
-    def _generate_contents_index(self, files):
+    def _generate_contents_index(self, packages):
         index = dict()
-        for filehash, filename in files:
-            package_info = self._get_package_info(filehash)
+        for package in packages:
+            package_info = self._get_package_info(package.get_filehash())
             location = '%s/%s' % (package_info[self._SECTION_FIELD],
                                   package_info[self._PACKAGE_FIELD])
 
@@ -963,8 +981,8 @@ class CommandLineDriver(object):
         parser.add_argument('package', nargs='*',
                             help='The packages to list.')
         args = parser.parse_args(args)
-        files = {(filename, filehash) for
-                     filehash, filename in repo.ls(args.package)}
+        files = {(package.get_filename(), package.get_filehash()) for
+                     package in repo.ls(args.package)}
         for filename, filehash in sorted(files):
             print(filehash[:8], filename)
 
