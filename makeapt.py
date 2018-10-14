@@ -347,7 +347,7 @@ class Repository(object):
         with open(path.get_as_string(), 'wb') as f:
             for chunk in content:
                 if isinstance(chunk, str):
-                    chunk = chunk.encode('ascii')
+                    chunk = chunk.encode('utf-8')
                 f.write(chunk)
 
     def _gzip(self, path):
