@@ -129,12 +129,16 @@ class _DistributionArch(object):
 
 
 class _Distribution(object):
-    def __init__(self, dist_id):
+    def __init__(self, dist_id, repo_index):
         self._id = dist_id
+        self._repo_index = repo_index
         self._packages = dict()
 
     def get_id(self):
         return self._id
+
+    def get_repository_index(self):
+        return self._repo_index
 
     def add_package(self, component_id, arch_id, package):
         key = component_id, arch_id
@@ -706,7 +710,7 @@ class Repository(object):
         ids = group.split(':')
         return tuple(ids) if len(ids) == 2 else None
 
-    def _get_distributions(self):
+    def _get_distributions(self, repo_index):
         dists = dict()
         for package, groups in self._get_all_packages():
             for group in groups:
@@ -718,7 +722,7 @@ class Repository(object):
                 if dist_id in dists:
                     dist = dists[dist_id]
                 else:
-                    dist = _Distribution(dist_id)
+                    dist = _Distribution(dist_id, repo_index)
                     dists[dist_id] = dist
 
                 arch_id = self._get_package_arch(package.get_filehash())
@@ -760,10 +764,10 @@ class Repository(object):
         return full_path
 
     def _save_index_file(self, dist, path_in_dist, content, dist_index,
-                         repo_index, add_to_by_hash_dir=True):
+                         add_to_by_hash_dir=True):
         path = self._save_apt_file(
             self.DISTS_DIR + dist.get_id() + path_in_dist,
-            content, repo_index)
+            content, dist.get_repository_index())
 
         # Remember the hashes and the size of the resulting file.
         path_in_dist_string = path_in_dist.get_as_string()
@@ -783,17 +787,17 @@ class Repository(object):
 
         return path
 
-    def _save_index(self, dist, path_in_dist, index, dist_index, repo_index,
+    def _save_index(self, dist, path_in_dist, index, dist_index,
                     create_compressed_versions=True,
                     keep_uncompressed_version=True):
         path = self._save_index_file(
-            dist, path_in_dist, index, dist_index, repo_index,
+            dist, path_in_dist, index, dist_index,
             add_to_by_hash_dir=keep_uncompressed_version)
         if create_compressed_versions:
             self._save_index_file(dist, path_in_dist.add_extension('.gz'),
-                                  self._gzip(path), dist_index, repo_index)
+                                  self._gzip(path), dist_index)
             self._save_index_file(dist, path_in_dist.add_extension('.bz2'),
-                                  self._bzip2(path), dist_index, repo_index)
+                                  self._bzip2(path), dist_index)
 
         # Note that the uncompressed version goes to the
         # distribution index even if it doesn't present in the
@@ -834,8 +838,7 @@ class Repository(object):
             locations = ','.join(sorted(index[contents_filename]))
             yield '%s %s\n' % (contents_filename, locations)
 
-    def _save_contents_index(self, arch, path_in_dist,
-                             dist_index, repo_index):
+    def _save_contents_index(self, arch, path_in_dist, dist_index):
         # Note that according to the Debian specification, we
         # have to add the uncompressed version of the index to
         # the release index regardless of whether we store the
@@ -844,31 +847,30 @@ class Repository(object):
         contents_index = self._generate_contents_index(arch.get_packages())
         path = path_in_dist + 'Contents-%s' % arch.get_id()
         self._save_index(arch.get_distribution(), path, contents_index,
-                         dist_index, repo_index,
-                         keep_uncompressed_version=False)
+                         dist_index, keep_uncompressed_version=False)
 
-    def _index_architecture(self, arch, dist_index, repo_index):
+    def _index_architecture(self, arch, dist_index):
         # Generate packages index.
         dir_in_dist = _Path([arch.get_component().get_id(),
                              'binary-%s' % arch.get_id()])
         dist = arch.get_distribution()
         self._save_index(dist, dir_in_dist + 'Packages',
                          self._generate_packages_index(arch.get_packages()),
-                         dist_index, repo_index)
+                         dist_index)
 
         # Generate release index.
         release_index = self._generate_release_index(arch)
         self._save_index(dist, dir_in_dist + 'Release',
-                         release_index, dist_index, repo_index,
+                         release_index, dist_index,
                          create_compressed_versions=False)
 
         # Generate component contents index.
         self._save_contents_index(arch, _Path([arch.get_component().get_id()]),
-                                  dist_index, repo_index)
+                                  dist_index)
 
-    def _index_distribution_component(self, component, dist_index, repo_index):
+    def _index_distribution_component(self, component, dist_index):
         for arch in component.get_archs():
-            self._index_architecture(arch, dist_index, repo_index)
+            self._index_architecture(arch, dist_index)
 
     def _generate_distribution_index(self, dist, dist_index):
         yield 'Origin: %s\n' % self._config['origin']
@@ -894,21 +896,21 @@ class Repository(object):
                 hashes, filesize = dist_index[index]
                 yield ' %s %s %s\n' % (hashes[hash_name], filesize, index)
 
-    def _index_distribution(self, dist, repo_index):
+    def _index_distribution(self, dist):
         # Generate component-specific indexes.
         dist_index = dict()
         for component in dist.get_components():
-            self._index_distribution_component(component, dist_index,
-                                               repo_index)
+            self._index_distribution_component(component, dist_index)
 
         # Generate distribution contents indexes.
         for arch in dist.get_archs():
-            self._save_contents_index(arch, _Path(), dist_index, repo_index)
+            self._save_contents_index(arch, _Path(), dist_index)
 
         # Generate distribution index.
         index = self._generate_distribution_index(dist, dist_index)
         index_path = self.DISTS_DIR + dist.get_id() + 'Release'
-        full_index_path = self._save_apt_file(index_path, index, repo_index)
+        full_index_path = self._save_apt_file(index_path, index,
+                                              dist.get_repository_index())
 
         # Sign the index.
         gpg_key_id = self._config['gpg_key_id']
@@ -932,8 +934,8 @@ class Repository(object):
         '''Generates APT indexes.'''
         # TODO: Remove the whole 'dists' directory before re-indexing.
         repo_index = _RepositoryIndex()
-        for dist in self._get_distributions():
-            self._index_distribution(dist, repo_index)
+        for dist in self._get_distributions(repo_index):
+            self._index_distribution(dist)
         # TODO: assert 0, repr(repo_index.get_as_dict())
 
 
