@@ -17,7 +17,9 @@ class Error(Exception):
 
 class _Path(object):
     def __init__(self, path=[]):
-        if isinstance(path, _Path):
+        if not path:
+            self._comps = []
+        elif isinstance(path, _Path):
             self._comps = path._comps
         elif isinstance(path, list):
             self._comps = path
@@ -299,8 +301,8 @@ class Repository(object):
     # Buffer size for file I/O, in bytes.
     _BUFF_SIZE = 4096
 
-    def __init__(self, path='.'):
-        self._apt_path = _Path([path])
+    def __init__(self, path=''):
+        self._apt_path = _Path(path)
         self._makeapt_path = self._apt_path + '.makeapt'
         self._config_path = self._makeapt_path + 'config'
         self._index_path = self._makeapt_path + 'index'
@@ -785,7 +787,7 @@ class Repository(object):
     def _save_apt_file(self, path, content, repo_index, is_temporary=False):
         full_path = self._apt_path + path
         self._save_file(full_path, content)
-        if not is_temporary:
+        if not is_temporary and repo_index:
             repo_index.add_file_path(path)
         return full_path
 
@@ -953,15 +955,17 @@ class Repository(object):
                              '--output', full_inrelease_path.get_as_string(),
                              '--yes', index_path.get_as_string()])
 
-    def index(self, repo_index=_RepositoryIndex()):
+    def index(self, repo_index=None):
         '''Generates APT indexes.'''
         # TODO: Remove the whole 'dists' directory before re-indexing.
         for dist in self._get_distributions(repo_index):
             self._index_distribution(dist)
 
-        if False:  # TODO
-            import pprint
-            pprint.pprint(repo_index.get())
+        # Add all packages in the pool to the repository index.
+        if repo_index:
+            for package in self._get_all_package_files():
+                path = self._get_full_package_path(package)
+                repo_index.add_file_path(path)
 
 
 class CommandLineDriver(object):
