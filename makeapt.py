@@ -92,6 +92,9 @@ class _ComponentArch(object):
     def get_packages(self):
         return self._component.get_packages_in_arch(self)
 
+    def get_path_in_distribution(self):
+        return self._component.get_path_in_distribution()
+
 
 class _Component(object):
     def __init__(self, component_id, dist):
@@ -112,6 +115,9 @@ class _Component(object):
         assert arch.get_component() is self
         return self._dist.get_packages_in_component_arch(arch)
 
+    def get_path_in_distribution(self):
+        return _Path([self._id])
+
 
 class _DistributionArch(object):
     def __init__(self, arch_id, dist):
@@ -126,6 +132,9 @@ class _DistributionArch(object):
 
     def get_packages(self):
         return self._dist.get_packages_in_arch(self)
+
+    def get_path_in_distribution(self):
+        return _Path()
 
 
 class _DistributionIndex(object):
@@ -853,14 +862,14 @@ class Repository(object):
             locations = ','.join(sorted(index[contents_filename]))
             yield '%s %s\n' % (contents_filename, locations)
 
-    def _save_contents_index(self, arch, path_in_dist):
+    def _save_contents_index(self, arch):
         # Note that according to the Debian specification, we
         # have to add the uncompressed version of the index to
         # the release index regardless of whether we store the
         # first. This way apt clients can check indexes both
         # before and after decompression.
         contents_index = self._generate_contents_index(arch.get_packages())
-        path = path_in_dist + 'Contents-%s' % arch.get_id()
+        path = arch.get_path_in_distribution() + 'Contents-%s' % arch.get_id()
         self._save_index(arch.get_distribution(), path, contents_index,
                          keep_uncompressed_version=False)
 
@@ -878,7 +887,7 @@ class Repository(object):
                          release_index, create_compressed_versions=False)
 
         # Generate component contents index.
-        self._save_contents_index(arch, _Path([arch.get_component().get_id()]))
+        self._save_contents_index(arch)
 
     def _index_distribution_component(self, component):
         for arch in component.get_archs():
@@ -916,7 +925,7 @@ class Repository(object):
 
         # Generate distribution contents indexes.
         for arch in dist.get_archs():
-            self._save_contents_index(arch, _Path())
+            self._save_contents_index(arch)
 
         # Generate distribution index.
         index = self._generate_distribution_index(dist)
