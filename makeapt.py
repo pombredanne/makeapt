@@ -450,8 +450,8 @@ class Repository(object):
         filename = package.get_filename()
         return _Path([filehash[:2], filehash[2:], filename])
 
-    def _get_full_package_path(self, file):
-        return self._pool_path + self._get_path_in_pool(file)
+    def _get_full_package_path(self, package):
+        return self._pool_path + self._get_path_in_pool(package)
 
     def _add_package_to_pool(self, path):
         filehash = self._hash_file(_Path([path]), self._KEY_HASH_NAME)
@@ -497,16 +497,16 @@ class Repository(object):
                 yield _Package(filehash, filename), groups
 
     def _get_all_package_files(self):
-        for file, groups in self._get_all_packages():
-            yield file
+        for package, groups in self._get_all_packages():
+            yield package
 
     def _get_package_files_by_hash(self, filehash):
         for filename in self._index[filehash]:
             yield _Package(filehash, filename)
 
     def _get_any_package_file_by_hash(self, filehash):
-        for file in self._get_package_files_by_hash(filehash):
-            return file
+        for package in self._get_package_files_by_hash(filehash):
+            return package
         return None
 
     def _parse_package_spec(self, spec):
@@ -533,9 +533,9 @@ class Repository(object):
         return matches
 
     def _filter_packages(self, pattern, packages, invert=False):
-        for file in packages:
-            if self._match_groups(file, pattern, invert):
-                yield file
+        for package in packages:
+            if self._match_groups(package, pattern, invert):
+                yield package
 
     def _get_packages_by_specs(self, package_specs):
         packages = self._get_all_package_files()
@@ -568,8 +568,8 @@ class Repository(object):
 
     def group(self, group, package_specs):
         '''Makes packages part of a group.'''
-        files = self._get_packages_by_specs(package_specs)
-        self.add_to_group(group, files)
+        packages = self._get_packages_by_specs(package_specs)
+        self.add_to_group(group, packages)
 
     def rmgroup(self, group, package_specs):
         '''Excludes packages from a group.'''
@@ -641,8 +641,8 @@ class Repository(object):
 
         return info
 
-    def _get_deb_contents(self, file):
-        path = self._get_full_package_path(file)
+    def _get_deb_contents(self, package):
+        path = self._get_full_package_path(package)
         out = self._run_shell(['dpkg-deb', '--contents', path.get_as_string()])
         out = out.decode('utf-8').split('\n')
 
@@ -668,15 +668,15 @@ class Repository(object):
             return self._cache[filehash]
 
         # Get any package with the given hash, if there are some.
-        file = self._get_any_package_file_by_hash(filehash)
-        if file is None:
+        package = self._get_any_package_file_by_hash(filehash)
+        if package is None:
             return None
 
-        info = self._get_deb_control_info(file)
+        info = self._get_deb_control_info(package)
 
-        info[self._CONTENTS_FIELD] = self._get_deb_contents(file)
+        info[self._CONTENTS_FIELD] = self._get_deb_contents(package)
 
-        path = self._get_full_package_path(file)
+        path = self._get_full_package_path(package)
         info[self._FILESIZE_FIELD] = os.path.getsize(path.get_as_string())
 
         hashes = self._hash_file(path, {'md5', 'sha1', 'sha256', 'sha512'})
@@ -960,8 +960,8 @@ class CommandLineDriver(object):
         parser.add_argument('path', nargs='+',
                             help='The package files to add.')
         args = parser.parse_args(args)
-        files = repo.add(args.path)
-        repo.add_to_group(args.group, files)
+        packages = repo.add(args.path)
+        repo.add_to_group(args.group, packages)
 
     def group(self, repo, parser, args):
         parser.add_argument('group', help='Group name.')
