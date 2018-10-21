@@ -3,6 +3,7 @@ __pycache__
 deb
 deb2
 makeapt.egg-info
+makeapt.pyc
 pool
 dist
 dists

@@ -11,6 +11,13 @@ import subprocess
 import sys
 
 
+# Python 2 compatibility fix.
+try:
+    FileNotFoundError
+except NameError:
+    FileNotFoundError = IOError
+
+
 class Error(Exception):
     pass
 
