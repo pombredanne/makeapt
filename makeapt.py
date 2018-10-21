@@ -483,19 +483,23 @@ class Repository(object):
         # TODO: Use links by default and fallback to copies on an option.
         self._copy_file(src, dest)
 
-    def _get_path_in_pool(self, package):
+    def _get_package_path_in_pool(self, package):
         filehash = package.get_filehash()
         filename = package.get_filename()
         return _Path([filehash[:2], filehash[2:], filename])
 
+    def _get_package_path_in_apt(self, package):
+        return (_Path([self.POOL_DIR_NAME]) +
+                    self._get_package_path_in_pool(package))
+
     def _get_full_package_path(self, package):
-        return self._pool_path + self._get_path_in_pool(package)
+        return self._apt_path + self._get_package_path_in_apt(package)
 
     def _add_package_to_pool(self, path):
         filehash = self._hash_file(_Path([path]), self._KEY_HASH_NAME)
         filename = os.path.basename(path)
         package = _Package(filehash, filename)
-        path_in_pool = self._get_path_in_pool(package)
+        path_in_pool = self._get_package_path_in_pool(package)
         dest_path = self._pool_path + path_in_pool
         self._copy_file(_Path([path]), dest_path, overwrite=False)
         return package
@@ -774,8 +778,7 @@ class Repository(object):
                 yield '%s: %s\n' % (field, info[field])
 
         # Emit additional fields.
-        filename_field = (_Path([self.POOL_DIR_NAME]) +
-                              self._get_path_in_pool(package)).get_as_string()
+        filename_field = self._get_package_path_in_apt(package).get_as_string()
         yield 'Filename: %s\n' % filename_field
 
         yield 'Size: %u\n' % info[self._FILESIZE_FIELD]
@@ -971,7 +974,7 @@ class Repository(object):
         # Add all packages in the pool to the repository index.
         if repo_index:
             for package in self._get_all_package_files():
-                path = self._get_full_package_path(package)
+                path = self._get_package_path_in_apt(package)
                 repo_index.add_file_path(path)
 
 
