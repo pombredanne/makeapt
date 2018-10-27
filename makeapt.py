@@ -308,12 +308,16 @@ class Repository(object):
     # Buffer size for file I/O, in bytes.
     _BUFF_SIZE = 4096
 
-    def __init__(self, path=''):
+    # Names of various makeapt files.
+    _CONFIG_FILENAME = 'config'
+    _INDEX_FILENAME = 'index'
+    _CACHE_FILENAME = 'cache'
+
+    def __init__(self, path='', use_makeapt_dir=True):
         self._apt_path = _Path(path)
-        self._makeapt_path = self._apt_path + '.makeapt'
-        self._config_path = self._makeapt_path + 'config'
-        self._index_path = self._makeapt_path + 'index'
-        self._cache_path = self._makeapt_path + 'cache'
+        self._use_makeapt_dir = use_makeapt_dir
+        if use_makeapt_dir:
+            self._makeapt_path = self._apt_path + '.makeapt'
         self._pool_path = self._apt_path + self.POOL_DIR_NAME
 
     def __enter__(self):
@@ -371,12 +375,17 @@ class Repository(object):
 
     def init(self):
         '''Initializes APT repository.'''
-        self._make_dir(self._makeapt_path)
+        if self._use_makeapt_dir:
+            self._make_dir(self._makeapt_path)
         self._make_dir(self._pool_path)
         # TODO: Should we make the 'dists' directory?
 
-    def _load_literal(self, path, default):
+    def _load_makeapt_file(self, filename, default):
+        if not self._use_makeapt_dir:
+            return default
+
         try:
+            path = self._makeapt_path + filename
             with open(path.get_as_string(), 'r') as f:
                 return ast.literal_eval(f.read())
         except FileNotFoundError:
@@ -408,14 +417,19 @@ class Repository(object):
             yield ','
         yield '\n'
 
-    def _save_literal(self, path, value):
+    def _save_makeapt_file(self, filename, value):
+        if not self._use_makeapt_dir:
+            return
+
+        path = self._makeapt_path + filename
         with open(path.get_as_string(), 'w') as f:
             for chunk in self._emit_literal(value):
                 f.write(chunk)
 
     def _load_config(self):
         default_config_copy = dict(self._DEFAULT_CONFIG)
-        config = self._load_literal(self._config_path, default_config_copy)
+        config = self._load_makeapt_file(self._CONFIG_FILENAME,
+                                         default_config_copy)
 
         # Make sure all fields are in place.
         for field, default_value in self._DEFAULT_CONFIG.items():
@@ -425,11 +439,11 @@ class Repository(object):
         self._config = config
 
     def _flush_config(self):
-        self._save_literal(self._config_path, self._config)
+        self._save_makeapt_file(self._CONFIG_FILENAME, self._config)
         del self._config
 
     def _load_index(self):
-        index = self._load_literal(self._index_path, dict())
+        index = self._load_makeapt_file(self._INDEX_FILENAME, dict())
 
         # Fix the type of empty groups that 'literal_eval()'
         # reads as dict's and not set's.
@@ -443,14 +457,14 @@ class Repository(object):
         self._index = index
 
     def _flush_index(self):
-        self._save_literal(self._index_path, self._index)
+        self._save_makeapt_file(self._INDEX_FILENAME, self._index)
         del self._index
 
     def _load_cache(self):
-        self._cache = self._load_literal(self._cache_path, dict())
+        self._cache = self._load_makeapt_file(self._CACHE_FILENAME, dict())
 
     def _flush_cache(self):
-        self._save_literal(self._cache_path, self._cache)
+        self._save_makeapt_file(self._CACHE_FILENAME, self._cache)
         del self._cache
 
     # Hashes a given file with a set of specified algorithms.
