@@ -68,15 +68,22 @@ class _Package(object):
 
 
 class _RepositoryIndex(object):
-    _index = dict()
+    def __init__(self, collect_files=False):
+        self._collect_files = collect_files
+        if collect_files:
+            self._index = dict()
 
     def add_file_path(self, path):
+        if not self._collect_files:
+            return
+
         i = self._index
         for comp in path.get_dirname():
             i = i.setdefault(comp, dict())
         i[path.get_basename()] = None
 
     def get(self):
+        assert self._collect_files
         index_copy = dict(self._index)
         return index_copy
 
@@ -493,9 +500,9 @@ class Repository(object):
         if overwrite or not os.path.exists(dest_string):
             shutil.copyfile(src.get_as_string(), dest_string)
 
-    def _link_or_copy_file(self, src, dest):
+    def _link_or_copy_apt_file(self, src, dest_in_apt):
         # TODO: Use links by default and fallback to copies on an option.
-        self._copy_file(src, dest)
+        self._copy_file(src, self._apt_path + dest_in_apt)
 
     def _get_package_path_in_pool(self, package):
         filehash = package.get_filehash()
@@ -817,10 +824,10 @@ class Repository(object):
 
     def _save_index_file(self, dist, path_in_dist, content,
                          is_temporary=False):
-        path = self._save_apt_file(
-            self.DISTS_DIR + dist.get_id() + path_in_dist,
-            content, dist.get_repository_index(),
-            is_temporary=is_temporary)
+        path_in_apt = self.DISTS_DIR + dist.get_id() + path_in_dist
+        repo_index = dist.get_repository_index()
+        path = self._save_apt_file(path_in_apt, content, repo_index,
+                                   is_temporary=is_temporary)
 
         # Remember the hashes and the size of the resulting file.
         path_in_dist_string = path_in_dist.get_as_string()
@@ -833,9 +840,10 @@ class Repository(object):
             hash_names = ['MD5Sum',  # Note the uppercase 'S'.
                           'SHA256']
             for hash_name, hash in self._hash_file(path, hash_names).items():
-                dir = path.get_dirname()
+                dir = path_in_apt.get_dirname()
                 dest_path = dir + 'by-hash' + hash_name + hash
-                self._link_or_copy_file(path, dest_path)
+                self._link_or_copy_apt_file(path, dest_path)
+                repo_index.add_file_path(dest_path)
 
         return path
 
@@ -979,7 +987,7 @@ class Repository(object):
                              '--output', full_inrelease_path.get_as_string(),
                              '--yes', index_path.get_as_string()])
 
-    def index(self, repo_index=None):
+    def index(self, repo_index=_RepositoryIndex()):
         '''Generates APT indexes.'''
         # TODO: Remove the whole 'dists' directory before re-indexing.
         for dist in self._get_distributions(repo_index):
