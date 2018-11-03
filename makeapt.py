@@ -974,18 +974,19 @@ class Repository(object):
         if gpg_key_id != 'none':
             digest_algo = 'SHA256'  # Should be configurable?
             full_index_gpg_path = full_index_path.add_extension('.gpg')
+            path = self._apt_path + index_path
             self._run_shell(['gpg', '--armor', '--detach-sign', '--sign',
                              '--default-key', gpg_key_id,
                              '--personal-digest-preferences', digest_algo,
                              '--output', full_index_gpg_path.get_as_string(),
-                             '--yes', index_path.get_as_string()])
+                             '--yes', path.get_as_string()])
 
             full_inrelease_path = full_index_path.get_dirname() + 'InRelease'
             self._run_shell(['gpg', '--armor', '--clearsign', '--sign',
                              '--default-key', gpg_key_id,
                              '--personal-digest-preferences', digest_algo,
                              '--output', full_inrelease_path.get_as_string(),
-                             '--yes', index_path.get_as_string()])
+                             '--yes', path.get_as_string()])
 
     def index(self, repo_index=_RepositoryIndex()):
         '''Generates APT indexes.'''
